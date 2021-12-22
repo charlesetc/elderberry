@@ -1,4 +1,5 @@
 #[derive(Debug)]
+
 pub enum Constant {
     Int(i32),
     String(String),
@@ -31,7 +32,7 @@ pub enum Expr {
     FieldAccess(Box<Expr>, FieldName),
     Variant(VariantName, Vec<Expr>),
     Match(Box<Expr>, Vec<MatchBranch>),
-    Lambda(Pattern, Box<Expr>),
+    Lambda(Vec<Pattern>, Box<Expr>),
     Apply(Box<Expr>, Vec<Expr>),
     Let(Pattern, Box<Expr>, Box<Expr>),
     Var(VarName),
@@ -78,6 +79,9 @@ enum Token {
 
     #[token(".")]
     Dot,
+
+    #[token("|")]
+    Pipe,
 
     #[token(",")]
     Comma,
@@ -162,7 +166,9 @@ fn parse_record_body(tokens: &mut &[TokenWithContext]) -> Vec<RecordField> {
     ret
 }
 
-fn parse_record_pattern_body_in_reverse(tokens: &mut &[TokenWithContext]) -> Vec<RecordFieldPattern> {
+fn parse_record_pattern_body_in_reverse(
+    tokens: &mut &[TokenWithContext],
+) -> Vec<RecordFieldPattern> {
     match tokens {
         [(Token::CloseBrace, _, _), rest @ ..] => {
             *tokens = rest;
@@ -229,9 +235,12 @@ fn parse_variant_body(tokens: &mut &[TokenWithContext]) -> Vec<Expr> {
     ret
 }
 
-fn parse_variant_pattern_body_in_reverse(tokens: &mut &[TokenWithContext]) -> Vec<Pattern> {
+fn parse_comma_separated_patterns_in_reverse(
+    tokens: &mut &[TokenWithContext],
+    until: Token,
+) -> Vec<Pattern> {
     match tokens {
-        [(Token::CloseParen, _, _), rest @ ..] => {
+        [(first_token, _, _), rest @ ..] if first_token == &until => {
             *tokens = rest;
             vec![]
         }
@@ -239,24 +248,24 @@ fn parse_variant_pattern_body_in_reverse(tokens: &mut &[TokenWithContext]) -> Ve
             let pat = parse_pattern(tokens);
             // gotta eagerly grab that comma
             match tokens {
-                [(Token::CloseParen, _, _), rest @ ..] => {
+                [(first_token, _, _), rest @ ..] if first_token == &until => {
                     *tokens = rest;
                     vec![pat]
                 }
                 [(Token::Comma, _, _), rest @ ..] => {
                     *tokens = rest;
-                    let mut ret = parse_variant_pattern_body_in_reverse(tokens);
+                    let mut ret = parse_comma_separated_patterns_in_reverse(tokens, until);
                     ret.push(pat);
                     ret
                 }
-                _ => expected("argument separator (,) or variant end ())", 3, tokens),
+                _ => expected(&format!("argument separator (,) or {:?}", until), 3, tokens),
             }
         }
     }
 }
 
-fn parse_variant_pattern_body(tokens: &mut &[TokenWithContext]) -> Vec<Pattern> {
-    let mut ret = parse_variant_pattern_body_in_reverse(tokens);
+fn parse_comma_separated_patterns(tokens: &mut &[TokenWithContext], until: Token) -> Vec<Pattern> {
+    let mut ret = parse_comma_separated_patterns_in_reverse(tokens, until);
     ret.reverse();
     ret
 }
@@ -269,7 +278,7 @@ fn parse_pattern(tokens: &mut &[TokenWithContext]) -> Pattern {
         }
         [(Token::CapitalVar, name, _), (Token::OpenParen, _, _), rest @ ..] => {
             *tokens = rest;
-            let pats = parse_variant_pattern_body(tokens);
+            let pats = parse_comma_separated_patterns(tokens, Token::CloseParen);
             Pattern::Variant(name.to_string(), pats)
         }
         [(Token::OpenBrace, _, _), rest @ ..] => {
@@ -277,7 +286,11 @@ fn parse_pattern(tokens: &mut &[TokenWithContext]) -> Pattern {
             let fields = parse_record_pattern_body(tokens);
             Pattern::Record(fields)
         }
-        _ => expected("pattern of either a binding, a variant, or a record", 3, tokens)
+        _ => expected(
+            "pattern of either a binding, a variant, or a record",
+            3,
+            tokens,
+        ),
     }
 }
 
@@ -320,6 +333,10 @@ fn parse_match_body(tokens: &mut &[TokenWithContext]) -> Vec<MatchBranch> {
     ret
 }
 
+fn parse_lambda_body(tokens: &mut &[TokenWithContext]) -> Vec<MatchBranch> {
+    unimplemented!()
+}
+
 fn parse_expression_without_field_access(tokens: &mut &[TokenWithContext]) -> Expr {
     match tokens {
         [(Token::String, str, _), rest @ ..] => {
@@ -343,6 +360,12 @@ fn parse_expression_without_field_access(tokens: &mut &[TokenWithContext]) -> Ex
         [(Token::CapitalVar, name, _), rest @ ..] => {
             *tokens = rest;
             Expr::Variant(name.to_string(), vec![])
+        }
+        [(Token::Pipe, _, _), rest @ ..] => {
+            *tokens = rest;
+            let patterns = parse_comma_separated_patterns(tokens, Token::Pipe);
+            let expression = parse_expression(tokens);
+            Expr::Lambda(patterns, Box::new(expression))
         }
         [(Token::Match, _, _), rest @ ..] => {
             *tokens = rest;
@@ -655,6 +678,30 @@ fn test_parse_match() {
                         ),
                     ),
                 ],
+            ),
+        ),
+    ]
+    "###)
+}
+
+#[test]
+fn test_parse_lambda() {
+    insta::assert_debug_snapshot!(parse("let fst = |x, y| x "), @r###"
+    [
+        ItemLet(
+            "fst",
+            Lambda(
+                [
+                    Var(
+                        "x",
+                    ),
+                    Var(
+                        "y",
+                    ),
+                ],
+                Var(
+                    "x",
+                ),
             ),
         ),
     ]
