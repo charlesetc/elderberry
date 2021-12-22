@@ -52,6 +52,9 @@ enum Token {
     #[token("module")]
     Module,
 
+    #[token("match")]
+    Match,
+
     #[token("let")]
     Let,
 
@@ -117,6 +120,13 @@ fn expected(string: &str, n: usize, tokens: &[TokenWithContext]) -> ! {
     )
 }
 
+fn expect_and_consume(tokens: &mut &[TokenWithContext], token: Token) {
+    match tokens {
+        [(first_token, _, _), rest @ ..] if &token == first_token => *tokens = rest,
+        _ => expected(&format!("{:?}", token), 3, tokens),
+    }
+}
+
 fn parse_record_body_in_reverse(tokens: &mut &[TokenWithContext]) -> Vec<RecordField> {
     match tokens {
         [(Token::CloseBrace, _, _), rest @ ..] => {
@@ -135,11 +145,11 @@ fn parse_record_body_in_reverse(tokens: &mut &[TokenWithContext]) -> Vec<RecordF
                 }
                 [(Token::Comma, _, _), rest @ ..] => {
                     *tokens = rest;
-                    let mut ret = parse_record_body(tokens);
+                    let mut ret = parse_record_body_in_reverse(tokens);
                     ret.push(field);
                     ret
                 }
-                _ => expected("record field separator (,) or record end (})", 3, tokens)
+                _ => expected("record field separator (,) or record end (})", 3, tokens),
             }
         }
         _ => expected("record field or record end (})", 5, tokens),
@@ -152,26 +162,220 @@ fn parse_record_body(tokens: &mut &[TokenWithContext]) -> Vec<RecordField> {
     ret
 }
 
-fn parse_expression(tokens: &mut &[TokenWithContext]) -> Expr {
+fn parse_record_pattern_body_in_reverse(tokens: &mut &[TokenWithContext]) -> Vec<RecordFieldPattern> {
+    match tokens {
+        [(Token::CloseBrace, _, _), rest @ ..] => {
+            *tokens = rest;
+            vec![]
+        }
+        [(Token::LowerVar, field_name, _), (Token::Colon, _, _), rest @ ..] => {
+            *tokens = rest;
+            let pat = parse_pattern(tokens);
+            let field = RecordFieldPattern(field_name.to_string(), pat);
+            // gotta eagerly grab that comma
+            match tokens {
+                [(Token::CloseBrace, _, _), rest @ ..] => {
+                    *tokens = rest;
+                    vec![field]
+                }
+                [(Token::Comma, _, _), rest @ ..] => {
+                    *tokens = rest;
+                    let mut ret = parse_record_pattern_body_in_reverse(tokens);
+                    ret.push(field);
+                    ret
+                }
+                _ => expected("record field separator (,) or record end (})", 3, tokens),
+            }
+        }
+        _ => expected("record field or record end (})", 5, tokens),
+    }
+}
+
+fn parse_record_pattern_body(tokens: &mut &[TokenWithContext]) -> Vec<RecordFieldPattern> {
+    let mut ret = parse_record_pattern_body_in_reverse(tokens);
+    ret.reverse();
+    ret
+}
+
+fn parse_variant_body_in_reverse(tokens: &mut &[TokenWithContext]) -> Vec<Expr> {
+    match tokens {
+        [(Token::CloseParen, _, _), rest @ ..] => {
+            *tokens = rest;
+            vec![]
+        }
+        _ => {
+            let expr = parse_expression(tokens);
+            // gotta eagerly grab that comma
+            match tokens {
+                [(Token::CloseParen, _, _), rest @ ..] => {
+                    *tokens = rest;
+                    vec![expr]
+                }
+                [(Token::Comma, _, _), rest @ ..] => {
+                    *tokens = rest;
+                    let mut ret = parse_variant_body_in_reverse(tokens);
+                    ret.push(expr);
+                    ret
+                }
+                _ => expected("argument separator (,) or variant end ())", 3, tokens),
+            }
+        }
+    }
+}
+
+fn parse_variant_body(tokens: &mut &[TokenWithContext]) -> Vec<Expr> {
+    let mut ret = parse_variant_body_in_reverse(tokens);
+    ret.reverse();
+    ret
+}
+
+fn parse_variant_pattern_body_in_reverse(tokens: &mut &[TokenWithContext]) -> Vec<Pattern> {
+    match tokens {
+        [(Token::CloseParen, _, _), rest @ ..] => {
+            *tokens = rest;
+            vec![]
+        }
+        _ => {
+            let pat = parse_pattern(tokens);
+            // gotta eagerly grab that comma
+            match tokens {
+                [(Token::CloseParen, _, _), rest @ ..] => {
+                    *tokens = rest;
+                    vec![pat]
+                }
+                [(Token::Comma, _, _), rest @ ..] => {
+                    *tokens = rest;
+                    let mut ret = parse_variant_pattern_body_in_reverse(tokens);
+                    ret.push(pat);
+                    ret
+                }
+                _ => expected("argument separator (,) or variant end ())", 3, tokens),
+            }
+        }
+    }
+}
+
+fn parse_variant_pattern_body(tokens: &mut &[TokenWithContext]) -> Vec<Pattern> {
+    let mut ret = parse_variant_pattern_body_in_reverse(tokens);
+    ret.reverse();
+    ret
+}
+
+fn parse_pattern(tokens: &mut &[TokenWithContext]) -> Pattern {
+    match tokens {
+        [(Token::LowerVar, name, _), rest @ ..] => {
+            *tokens = rest;
+            Pattern::Var(name.to_string())
+        }
+        [(Token::CapitalVar, name, _), (Token::OpenParen, _, _), rest @ ..] => {
+            *tokens = rest;
+            let pats = parse_variant_pattern_body(tokens);
+            Pattern::Variant(name.to_string(), pats)
+        }
+        [(Token::OpenBrace, _, _), rest @ ..] => {
+            *tokens = rest;
+            let fields = parse_record_pattern_body(tokens);
+            Pattern::Record(fields)
+        }
+        _ => expected("pattern of either a binding, a variant, or a record", 3, tokens)
+    }
+}
+
+fn parse_match_branch(tokens: &mut &[TokenWithContext]) -> MatchBranch {
+    let pattern = parse_pattern(tokens);
+    expect_and_consume(tokens, Token::Arrow);
+    let expr = parse_expression(tokens);
+    MatchBranch(pattern, expr)
+}
+
+fn parse_match_body_in_reverse(tokens: &mut &[TokenWithContext]) -> Vec<MatchBranch> {
+    match tokens {
+        [(Token::CloseBrace, _, _), rest @ ..] => {
+            *tokens = rest;
+            vec![]
+        }
+        _ => {
+            let branch = parse_match_branch(tokens);
+            // gotta eagerly grab that comma
+            match tokens {
+                [(Token::CloseBrace, _, _), rest @ ..] => {
+                    *tokens = rest;
+                    vec![branch]
+                }
+                [(Token::Comma, _, _), rest @ ..] => {
+                    *tokens = rest;
+                    let mut ret = parse_match_body_in_reverse(tokens);
+                    ret.push(branch);
+                    ret
+                }
+                _ => expected("argument separator (,) or variant end ())", 3, tokens),
+            }
+        }
+    }
+}
+
+fn parse_match_body(tokens: &mut &[TokenWithContext]) -> Vec<MatchBranch> {
+    let mut ret = parse_match_body_in_reverse(tokens);
+    ret.reverse();
+    ret
+}
+
+fn parse_expression_without_field_access(tokens: &mut &[TokenWithContext]) -> Expr {
     match tokens {
         [(Token::String, str, _), rest @ ..] => {
             *tokens = rest;
             Expr::Constant(Constant::String(str.to_string()))
+        }
+        [(Token::LowerVar, name, _), rest @ ..] => {
+            *tokens = rest;
+            Expr::Var(name.to_string())
         }
         [(Token::OpenBrace, _, _), rest @ ..] => {
             *tokens = rest;
             let fields = parse_record_body(tokens);
             Expr::Record(fields)
         }
+        [(Token::CapitalVar, name, _), (Token::OpenParen, _, _), rest @ ..] => {
+            *tokens = rest;
+            let exprs = parse_variant_body(tokens);
+            Expr::Variant(name.to_string(), exprs)
+        }
+        [(Token::CapitalVar, name, _), rest @ ..] => {
+            *tokens = rest;
+            Expr::Variant(name.to_string(), vec![])
+        }
+        [(Token::Match, _, _), rest @ ..] => {
+            *tokens = rest;
+            let match_expr = parse_expression(tokens);
+            expect_and_consume(tokens, Token::OpenBrace);
+            let branches = parse_match_body(tokens);
+            Expr::Match(Box::new(match_expr), branches)
+        }
         _ => expected("string, ...", 5, tokens),
     }
+}
+
+fn parse_field_access(tokens: &mut &[TokenWithContext], expr: Expr) -> Expr {
+    match tokens {
+        [(Token::Dot, _, _), (Token::LowerVar, field_name, _), rest @ ..] => {
+            *tokens = rest;
+            let expr = Expr::FieldAccess(Box::new(expr), field_name.to_string());
+            parse_field_access(tokens, expr)
+        }
+        _ => expr,
+    }
+}
+
+fn parse_expression(tokens: &mut &[TokenWithContext]) -> Expr {
+    let expr = parse_expression_without_field_access(tokens);
+    parse_field_access(tokens, expr)
 }
 
 fn parse_module_path_in_reverse(tokens: &mut &[TokenWithContext]) -> Vec<VarName> {
     match tokens {
         [(Token::CapitalVar, name, _), (Token::Dot, _, _), rest @ ..] => {
             *tokens = rest;
-            let mut ret = parse_module_path(tokens);
+            let mut ret = parse_module_path_in_reverse(tokens);
             ret.push(name.to_string());
             ret
         }
@@ -200,7 +404,7 @@ fn parse_module_body_in_reverse(tokens: &mut &[TokenWithContext]) -> Vec<Item> {
         }
         _ => {
             let item = parse_item(tokens).unwrap_or_else(|| expected(error_statement, 5, tokens));
-            let mut ret = parse_module_body(tokens);
+            let mut ret = parse_module_body_in_reverse(tokens);
             ret.push(item);
             ret
         }
@@ -317,7 +521,7 @@ fn test_parse_module_alias() {
 
 #[test]
 fn test_parse_record() {
-    insta::assert_debug_snapshot!(parse("let x = { a: \"wow\", b: {} }"), @r###"
+    insta::assert_debug_snapshot!(parse("let x = { a: wow, b: {} }"), @r###"
     [
         ItemLet(
             "x",
@@ -325,10 +529,8 @@ fn test_parse_record() {
                 [
                     RecordField(
                         "a",
-                        Constant(
-                            String(
-                                "\"wow\"",
-                            ),
+                        Var(
+                            "wow",
                         ),
                     ),
                     RecordField(
@@ -342,4 +544,119 @@ fn test_parse_record() {
         ),
     ]
     "###);
+}
+
+#[test]
+fn test_parse_field_access() {
+    insta::assert_debug_snapshot!(parse("let x = {}.bar.baz"), @r###"
+    [
+        ItemLet(
+            "x",
+            FieldAccess(
+                FieldAccess(
+                    Record(
+                        [],
+                    ),
+                    "bar",
+                ),
+                "baz",
+            ),
+        ),
+    ]
+    "###);
+}
+
+#[test]
+fn test_parse_variant() {
+    insta::assert_debug_snapshot!(parse("let a = Apple({}, \"hi\", Sweet(wow), Blue)"), @r###"
+    [
+        ItemLet(
+            "a",
+            Variant(
+                "Apple",
+                [
+                    Record(
+                        [],
+                    ),
+                    Constant(
+                        String(
+                            "\"hi\"",
+                        ),
+                    ),
+                    Variant(
+                        "Sweet",
+                        [
+                            Var(
+                                "wow",
+                            ),
+                        ],
+                    ),
+                    Variant(
+                        "Blue",
+                        [],
+                    ),
+                ],
+            ),
+        ),
+    ]
+    "###)
+}
+
+#[test]
+fn test_parse_match() {
+    insta::assert_debug_snapshot!(parse("let a = match b {}"), @r###"
+    [
+        ItemLet(
+            "a",
+            Match(
+                Var(
+                    "b",
+                ),
+                [],
+            ),
+        ),
+    ]
+    "###);
+    insta::assert_debug_snapshot!(parse("let a = match b { x -> {} , Nice({ this: a }) -> {} }"), @r###"
+    [
+        ItemLet(
+            "a",
+            Match(
+                Var(
+                    "b",
+                ),
+                [
+                    MatchBranch(
+                        Var(
+                            "x",
+                        ),
+                        Record(
+                            [],
+                        ),
+                    ),
+                    MatchBranch(
+                        Variant(
+                            "Nice",
+                            [
+                                Record(
+                                    [
+                                        RecordFieldPattern(
+                                            "this",
+                                            Var(
+                                                "a",
+                                            ),
+                                        ),
+                                    ],
+                                ),
+                            ],
+                        ),
+                        Record(
+                            [],
+                        ),
+                    ),
+                ],
+            ),
+        ),
+    ]
+    "###)
 }
