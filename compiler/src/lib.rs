@@ -26,6 +26,13 @@ pub struct RecordField(FieldName, Expr);
 pub struct MatchBranch(Pattern, Expr);
 
 #[derive(Debug)]
+pub enum Statements {
+    Return(Box<Expr>),
+    Sequence(Box<Expr>, Box<Statements>),
+    Let(VarName, Box<Expr>, Box<Statements>),
+}
+
+#[derive(Debug)]
 pub enum Expr {
     Constant(Constant),
     Record(Vec<RecordField>),
@@ -34,7 +41,7 @@ pub enum Expr {
     Match(Box<Expr>, Vec<MatchBranch>),
     Lambda(Vec<Pattern>, Box<Expr>),
     Apply(Box<Expr>, Vec<Expr>),
-    Let(Pattern, Box<Expr>, Box<Expr>),
+    Block(Statements),
     Var(VarName),
 }
 
@@ -333,11 +340,14 @@ fn parse_match_body(tokens: &mut &[TokenWithContext]) -> Vec<MatchBranch> {
     ret
 }
 
-fn parse_lambda_body(tokens: &mut &[TokenWithContext]) -> Vec<MatchBranch> {
-    unimplemented!()
+fn starts_with_record_field(rest: &mut &[TokenWithContext]) -> Expr {
+    match rest {
+        [(Token::LowerVar, _, _), (Token::Colon, _, _), rest @ ..]
+
+    }
 }
 
-fn parse_expression_without_field_access(tokens: &mut &[TokenWithContext]) -> Expr {
+fn parse_expression_without_operators(tokens: &mut &[TokenWithContext]) -> Expr {
     match tokens {
         [(Token::String, str, _), rest @ ..] => {
             *tokens = rest;
@@ -347,7 +357,11 @@ fn parse_expression_without_field_access(tokens: &mut &[TokenWithContext]) -> Ex
             *tokens = rest;
             Expr::Var(name.to_string())
         }
-        [(Token::OpenBrace, _, _), rest @ ..] => {
+        [(Token::OpenBrace, _, _), (Token::CloseBrace, _, _), rest @ ..] => {
+            *tokens = rest;
+            Expr::Record(vec![])
+        }
+        [(Token::OpenBrace, _, _), rest @ ..] if starts_with_record_field(rest) => {
             *tokens = rest;
             let fields = parse_record_body(tokens);
             Expr::Record(fields)
@@ -378,20 +392,61 @@ fn parse_expression_without_field_access(tokens: &mut &[TokenWithContext]) -> Ex
     }
 }
 
-fn parse_field_access(tokens: &mut &[TokenWithContext], expr: Expr) -> Expr {
+fn parse_comma_separated_expressions_in_reverse(
+    tokens: &mut &[TokenWithContext],
+    until: Token,
+) -> Vec<Expr> {
+    match tokens {
+        [(first_token, _, _), rest @ ..] if first_token == &until => {
+            *tokens = rest;
+            vec![]
+        }
+        _ => {
+            let expr = parse_expression(tokens);
+            // gotta eagerly grab that comma
+            match tokens {
+                [(first_token, _, _), rest @ ..] if first_token == &until => {
+                    *tokens = rest;
+                    vec![expr]
+                }
+                [(Token::Comma, _, _), rest @ ..] => {
+                    *tokens = rest;
+                    let mut ret = parse_comma_separated_expressions_in_reverse(tokens, until);
+                    ret.push(expr);
+                    ret
+                }
+                _ => expected(&format!("argument separator (,) or {:?}", until), 3, tokens),
+            }
+        }
+    }
+}
+
+fn parse_comma_separated_expressions(tokens: &mut &[TokenWithContext], until: Token) -> Vec<Expr> {
+    let mut ret = parse_comma_separated_expressions_in_reverse(tokens, until);
+    ret.reverse();
+    ret
+}
+
+fn parse_operators(tokens: &mut &[TokenWithContext], expr: Expr) -> Expr {
     match tokens {
         [(Token::Dot, _, _), (Token::LowerVar, field_name, _), rest @ ..] => {
             *tokens = rest;
             let expr = Expr::FieldAccess(Box::new(expr), field_name.to_string());
-            parse_field_access(tokens, expr)
+            parse_operators(tokens, expr)
+        }
+        [(Token::OpenParen, _, _), rest @ ..] => {
+            *tokens = rest;
+            let args = parse_comma_separated_expressions(tokens, Token::CloseParen);
+            let expr = Expr::Apply(Box::new(expr), args);
+            parse_operators(tokens, expr)
         }
         _ => expr,
     }
 }
 
 fn parse_expression(tokens: &mut &[TokenWithContext]) -> Expr {
-    let expr = parse_expression_without_field_access(tokens);
-    parse_field_access(tokens, expr)
+    let expr = parse_expression_without_operators(tokens);
+    parse_operators(tokens, expr)
 }
 
 fn parse_module_path_in_reverse(tokens: &mut &[TokenWithContext]) -> Vec<VarName> {
@@ -702,6 +757,41 @@ fn test_parse_lambda() {
                 Var(
                     "x",
                 ),
+            ),
+        ),
+    ]
+    "###)
+}
+
+#[test]
+fn test_parse_apply() {
+    insta::assert_debug_snapshot!(parse("let a = x(y).test({}, Test)"), @r###"
+    [
+        ItemLet(
+            "a",
+            Apply(
+                FieldAccess(
+                    Apply(
+                        Var(
+                            "x",
+                        ),
+                        [
+                            Var(
+                                "y",
+                            ),
+                        ],
+                    ),
+                    "test",
+                ),
+                [
+                    Record(
+                        [],
+                    ),
+                    Variant(
+                        "Test",
+                        [],
+                    ),
+                ],
             ),
         ),
     ]

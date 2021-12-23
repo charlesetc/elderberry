@@ -15,17 +15,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bed554bd50246729a1ec158d08aa3235d1b69d94ad120ebe187e28894787e736"
 
 [[package]]
-name = "cloudberry-compiler"
-version = "0.1.0"
-dependencies = [
- "expect-test",
- "insta",
- "logos",
- "logos-derive",
- "substring",
-]
-
-[[package]]
 name = "console"
 version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -43,6 +32,17 @@ name = "dissimilar"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "31ad93652f40969dead8d4bf897a41e9462095152eb21c56e5830537e41179dd"
+
+[[package]]
+name = "elderberry-compiler"
+version = "0.1.0"
+dependencies = [
+ "expect-test",
+ "insta",
+ "logos",
+ "logos-derive",
+ "substring",
+]
 
 [[package]]
 name = "encode_unicode"
