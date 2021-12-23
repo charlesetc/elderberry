@@ -439,7 +439,7 @@ fn parse_expression_without_operators(tokens: &mut &[TokenWithSpan]) -> Expr {
             let branches = parse_match_body(tokens);
             Expr::Match(Box::new(match_expr), branches)
         }
-        _ => expected("string, ...", 5, tokens),
+        _ => expected("the start of an expression expression (one of `match`, `{`, `|`, a variable name, or a constant.)", 5, tokens),
     }
 }
 
