@@ -1,9 +1,10 @@
 use logos::{Lexer, Logos};
-use std::{fs::read_to_string, str::Chars};
+use std::str::Chars;
 
 #[derive(Debug)]
 pub enum Constant {
-    Int(i32),
+    Int(i64),
+    Float(f64),
     String(String),
 }
 
@@ -66,9 +67,12 @@ fn unescape_chars(mut chars: Chars) -> String {
                 Some('n') => ret.push('\n'),
                 Some('t') => ret.push('\t'),
                 Some('"') => ret.push('\"'),
-                Some(d) => { ret.push('\\'); ret.push(d)}
+                Some(d) => {
+                    ret.push('\\');
+                    ret.push(d)
+                }
             },
-            _ => ret.push(c)
+            _ => ret.push(c),
         }
     }
     ret
@@ -126,6 +130,12 @@ enum Token {
 
     #[regex(r#""(?:[^"]|\\")*""#, unescape_string)]
     String(String),
+
+    #[regex("(\\+|-)?[0-9]+", |lex| lex.slice().parse())]
+    Int(i64),
+
+    #[regex("[0-9]+\\.[0-9]+", |lex| lex.slice().parse())]
+    Float(f64),
 
     #[regex("[a-z][a-zA-Z]*", |lex| lex.slice().parse())]
     LowerVar(String),
@@ -364,13 +374,6 @@ fn parse_match_body(tokens: &mut &[TokenWithSpan]) -> Vec<MatchBranch> {
     ret
 }
 
-fn starts_with_record_field(tokens: &[TokenWithSpan]) -> bool {
-    match tokens {
-        [(Token::LowerVar(_), _), (Token::Colon, _), ..] => true,
-        _ => false,
-    }
-}
-
 fn parse_statements(tokens: &mut &[TokenWithSpan]) -> Statements {
     match tokens {
         [(Token::Let, _), rest @ ..] => {
@@ -381,7 +384,7 @@ fn parse_statements(tokens: &mut &[TokenWithSpan]) -> Statements {
             let statements = parse_statements(tokens);
             Statements::Let(pat, Box::new(expr), Box::new(statements))
         }
-        [(Token::CloseBrace, _), rest @ ..] => {
+        [(Token::CloseParen, _), rest @ ..] => {
             *tokens = rest;
             Statements::Empty
         }
@@ -399,20 +402,24 @@ fn parse_expression_without_operators(tokens: &mut &[TokenWithSpan]) -> Expr {
             *tokens = rest;
             Expr::Constant(Constant::String(str.to_string()))
         }
+        [(Token::Int(i), _), rest @ ..] => {
+            *tokens = rest;
+            Expr::Constant(Constant::Int(i.clone()))
+        }
+        [(Token::Float(f), _), rest @ ..] => {
+            *tokens = rest;
+            Expr::Constant(Constant::Float(f.clone()))
+        }
         [(Token::LowerVar(name), _), rest @ ..] => {
             *tokens = rest;
             Expr::Var(name.to_string())
         }
-        [(Token::OpenBrace, _), (Token::CloseBrace, _), rest @ ..] => {
-            *tokens = rest;
-            Expr::Record(vec![])
-        }
-        [(Token::OpenBrace, _), rest @ ..] if starts_with_record_field(rest) => {
+        [(Token::OpenBrace, _), rest @ ..] => {
             *tokens = rest;
             let fields = parse_record_body(tokens);
             Expr::Record(fields)
         }
-        [(Token::OpenBrace, _), rest @ ..] => {
+        [(Token::OpenParen, _), rest @ ..] => {
             *tokens = rest;
             let statements = parse_statements(tokens);
             Expr::Block(statements)
@@ -696,6 +703,22 @@ fn test_parse_field_access() {
 }
 
 #[test]
+fn test_parse_numbers() {
+    insta::assert_debug_snapshot!(parse(r#"let s = 2"#), @r###"
+    [
+        ItemLet(
+            "s",
+            Constant(
+                Int(
+                    2,
+                ),
+            ),
+        ),
+    ]
+    "###)
+}
+
+#[test]
 fn test_parse_string() {
     insta::assert_debug_snapshot!(parse(r#"let s =  "beginning \"of\" \\the string\\ \n \t right? " "#), @r###"
     [
@@ -869,12 +892,12 @@ fn test_parse_apply() {
 fn test_parse_block() {
     let parsed = parse(
         "
-    let a = |x| {
+    let a = |x| (
         let y = A
         wow
         let x = B
         x(y) 
-    }
+    )
     ",
     );
     insta::assert_debug_snapshot!(parsed, @r###"
