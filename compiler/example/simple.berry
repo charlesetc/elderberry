@@ -1,0 +1,3 @@
+let snd = |x, y| y
+
+let main = snd({foo: {}}, Apple(a, b, c))
