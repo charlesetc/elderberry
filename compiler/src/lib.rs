@@ -61,7 +61,7 @@ fn unescape_chars(mut chars: Chars) -> String {
     while let Some(c) = chars.next() {
         match c {
             '\\' => match chars.next() {
-                None => panic!("shouldn't encounter this case because of our lexer"),
+                None => ret.push('\\'),
                 Some('\\') => ret.push('\\'),
                 Some('n') => ret.push('\n'),
                 Some('t') => ret.push('\t'),
@@ -75,7 +75,7 @@ fn unescape_chars(mut chars: Chars) -> String {
 }
 
 fn unescape_string(lexer: &mut Lexer<Token>) -> Option<String> {
-    let str: String = lexer.slice().parse().ok()?;
+    let str: String = lexer.slice().parse().unwrap();
     let mut chars = str.chars();
     // remove first and last `"` characters
     chars.next();
@@ -124,7 +124,7 @@ enum Token {
     #[token(":")]
     Colon,
 
-    #[regex(r#""([^"\\]|\\t|\\n|\\")*""#, unescape_string)]
+    #[regex(r#""(?:[^"]|\\")*""#, unescape_string)]
     String(String),
 
     #[regex("[a-z][a-zA-Z]*", |lex| lex.slice().parse())]
@@ -133,8 +133,10 @@ enum Token {
     #[regex("[A-Z][a-zA-Z]*", |lex| lex.slice().parse())]
     CapitalVar(String),
 
-    #[error]
     #[regex(r"[ \t\n\f]+", logos::skip)]
+    Space,
+
+    #[error]
     Error,
 }
 
@@ -694,8 +696,24 @@ fn test_parse_field_access() {
 }
 
 #[test]
+fn test_parse_string() {
+    insta::assert_debug_snapshot!(parse(r#"let s =  "beginning \"of\" \\the string\\ \n \t right? " "#), @r###"
+    [
+        ItemLet(
+            "s",
+            Constant(
+                String(
+                    "beginning \"of\" \\the string\\ \n \t right? ",
+                ),
+            ),
+        ),
+    ]
+    "###)
+}
+
+#[test]
 fn test_parse_variant() {
-    insta::assert_debug_snapshot!(parse("let a = Apple({}, \"hi\", Sweet(wow), Blue)"), @r###"
+    insta::assert_debug_snapshot!(parse(r#"let a = Apple({}, "hi", Sweet(wow), Blue)"#), @r###"
     [
         ItemLet(
             "a",
