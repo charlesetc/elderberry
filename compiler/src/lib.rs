@@ -27,9 +27,9 @@ pub struct MatchBranch(Pattern, Expr);
 
 #[derive(Debug)]
 pub enum Statements {
-    Return(Box<Expr>),
+    Empty,
     Sequence(Box<Expr>, Box<Statements>),
-    Let(VarName, Box<Expr>, Box<Statements>),
+    Let(Pattern, Box<Expr>, Box<Statements>),
 }
 
 #[derive(Debug)]
@@ -340,10 +340,32 @@ fn parse_match_body(tokens: &mut &[TokenWithContext]) -> Vec<MatchBranch> {
     ret
 }
 
-fn starts_with_record_field(rest: &mut &[TokenWithContext]) -> Expr {
-    match rest {
-        [(Token::LowerVar, _, _), (Token::Colon, _, _), rest @ ..]
+fn starts_with_record_field(tokens: &[TokenWithContext]) -> bool{
+    match tokens {
+        [(Token::LowerVar, _, _), (Token::Colon, _, _), ..] => true,
+        _ => false
+    }
+}
 
+fn parse_statements(tokens: &mut &[TokenWithContext]) -> Statements {
+    match tokens {
+        [(Token::Let, _,_ ), rest @ ..] => {
+            *tokens = rest;
+            let pat = parse_pattern(tokens);
+            expect_and_consume(tokens, Token::Equals);
+            let expr = parse_expression(tokens);
+            let statements = parse_statements(tokens);
+            Statements::Let(pat, Box::new(expr), Box::new(statements))
+        }
+        [(Token::CloseBrace, _, _), rest @ ..] => {
+            *tokens = rest;
+            Statements::Empty
+        }
+        _ => {
+            let expr = parse_expression(tokens);
+            let statements = parse_statements(tokens);
+            Statements::Sequence(Box::new(expr), Box::new(statements))
+        }
     }
 }
 
@@ -365,6 +387,11 @@ fn parse_expression_without_operators(tokens: &mut &[TokenWithContext]) -> Expr 
             *tokens = rest;
             let fields = parse_record_body(tokens);
             Expr::Record(fields)
+        }
+        [(Token::OpenBrace, _, _), rest @ ..] => {
+            *tokens = rest;
+            let statements = parse_statements(tokens);
+            Expr::Block(statements)
         }
         [(Token::CapitalVar, name, _), (Token::OpenParen, _, _), rest @ ..] => {
             *tokens = rest;
@@ -792,6 +819,71 @@ fn test_parse_apply() {
                         [],
                     ),
                 ],
+            ),
+        ),
+    ]
+    "###)
+}
+
+
+#[test]
+fn test_parse_block() {
+    let parsed = parse("
+    let a = |x| {
+        let y = A
+        wow
+        let x = B
+        x(y) 
+    }
+    ");
+    insta::assert_debug_snapshot!(parsed, @r###"
+    [
+        ItemLet(
+            "a",
+            Lambda(
+                [
+                    Var(
+                        "x",
+                    ),
+                ],
+                Block(
+                    Let(
+                        Var(
+                            "y",
+                        ),
+                        Variant(
+                            "A",
+                            [],
+                        ),
+                        Sequence(
+                            Var(
+                                "wow",
+                            ),
+                            Let(
+                                Var(
+                                    "x",
+                                ),
+                                Variant(
+                                    "B",
+                                    [],
+                                ),
+                                Sequence(
+                                    Apply(
+                                        Var(
+                                            "x",
+                                        ),
+                                        [
+                                            Var(
+                                                "y",
+                                            ),
+                                        ],
+                                    ),
+                                    Empty,
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
             ),
         ),
     ]
