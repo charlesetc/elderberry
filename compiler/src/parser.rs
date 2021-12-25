@@ -591,7 +591,7 @@ pub fn parse(source: &str) -> Program {
 }
 
 #[test]
-fn test_parse_module_alias() {
+fn test_module_alias() {
     insta::assert_debug_snapshot!(parse("module X = B module C = B.Y"), @r###"
     [
         Alias(
@@ -656,7 +656,7 @@ fn test_parse_module_alias() {
 }
 
 #[test]
-fn test_parse_record() {
+fn test_record() {
     insta::assert_debug_snapshot!(parse("let x = { a: wow, b: {} }"), @r###"
     [
         ItemLet(
@@ -683,7 +683,7 @@ fn test_parse_record() {
 }
 
 #[test]
-fn test_parse_field_access() {
+fn test_field_access() {
     insta::assert_debug_snapshot!(parse("let x = {}.bar.baz"), @r###"
     [
         ItemLet(
@@ -703,7 +703,7 @@ fn test_parse_field_access() {
 }
 
 #[test]
-fn test_parse_numbers() {
+fn test_numbers() {
     insta::assert_debug_snapshot!(parse(r#"let s = 2"#), @r###"
     [
         ItemLet(
@@ -719,7 +719,7 @@ fn test_parse_numbers() {
 }
 
 #[test]
-fn test_parse_string() {
+fn test_string() {
     insta::assert_debug_snapshot!(parse(r#"let s =  "beginning \"of\" \\the string\\ \n \t right? " "#), @r###"
     [
         ItemLet(
@@ -735,7 +735,7 @@ fn test_parse_string() {
 }
 
 #[test]
-fn test_parse_variant() {
+fn test_variant() {
     insta::assert_debug_snapshot!(parse(r#"let a = Apple({}, "hi", Sweet(wow), Blue)"#), @r###"
     [
         ItemLet(
@@ -771,7 +771,7 @@ fn test_parse_variant() {
 }
 
 #[test]
-fn test_parse_match() {
+fn test_match() {
     insta::assert_debug_snapshot!(parse("let a = match b {}"), @r###"
     [
         ItemLet(
@@ -830,7 +830,7 @@ fn test_parse_match() {
 }
 
 #[test]
-fn test_parse_lambda() {
+fn test_lambda() {
     insta::assert_debug_snapshot!(parse("let fst = |x, y| x "), @r###"
     [
         ItemLet(
@@ -854,7 +854,7 @@ fn test_parse_lambda() {
 }
 
 #[test]
-fn test_parse_apply() {
+fn test_apply() {
     insta::assert_debug_snapshot!(parse("let a = x(y).test({}, Test)"), @r###"
     [
         ItemLet(
@@ -889,7 +889,7 @@ fn test_parse_apply() {
 }
 
 #[test]
-fn test_parse_block() {
+fn test_block() {
     let parsed = parse(
         "
     let a = |x| (
