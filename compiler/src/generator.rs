@@ -143,19 +143,18 @@ fn generate_expr(out: &mut String, expr: &Expr) {
             out.push_str(";");
             for MatchBranch(pattern, body_expr) in branches {
                 let captures = pattern.captures_in_order();
-                out.push_str("if (let [");
+                out.push_str("if (res = _eldb.matches(");
+                generate_pattern(out, pattern);
+                out.push_str(", _eldb_matched_expr)) { let [");
                 for capture in captures {
                     out.push_str(capture);
                     out.push_str(",");
                 }
-                out.push_str("] = _eldb.matches(");
-                generate_pattern(out, pattern);
-                out.push_str(", _eldb_matched_expr)) {");
+                out.push_str("] = res;");
                 generate_expr(out, body_expr);
-                out.push_str("} else")
-                // if (result = _eldb.matches()) {} else {}
+                out.push_str("} else ")
             }
-            out.push_str("{_eldb.unhandled_match()}})");
+            out.push_str("{_eldb.unhandled_match()}})()");
         }
     }
 }

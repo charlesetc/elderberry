@@ -271,6 +271,10 @@ fn parse_pattern(tokens: &mut &[TokenWithSpan]) -> Pattern {
             let pats = parse_comma_separated_patterns(tokens, Token::CloseParen);
             Pattern::Variant(name.to_string(), pats)
         }
+        [(Token::CapitalVar(name), _), rest @ ..] => {
+            *tokens = rest;
+            Pattern::Variant(name.to_string(), vec![])
+        }
         [(Token::OpenBrace, _), rest @ ..] => {
             *tokens = rest;
             let fields = parse_record_pattern_body(tokens);

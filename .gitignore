@@ -1,3 +1,4 @@
 compiler/target
 *.sublime-workspace
 *.snap
+.DS_Store
