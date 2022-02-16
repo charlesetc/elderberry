@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 logos = "*"
 logos-derive = "*"
-expect-test = "*"
+# expect-test = "*"
 
 [test-dependencies]
 insta = "*"

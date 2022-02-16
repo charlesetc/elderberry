@@ -1,61 +1,7 @@
 use logos::{Lexer, Logos};
 use std::str::Chars;
 
-#[derive(Debug)]
-pub enum Constant {
-    Int(i64),
-    Float(f64),
-    String(String),
-}
-
-type VarName = String;
-type FieldName = String;
-type VariantName = String;
-
-#[derive(Debug)]
-pub struct RecordFieldPattern(FieldName, Pattern);
-
-#[derive(Debug)]
-pub enum Pattern {
-    Variant(VariantName, Vec<Pattern>),
-    Record(Vec<RecordFieldPattern>),
-    Var(VarName),
-}
-
-#[derive(Debug)]
-pub struct RecordField(FieldName, Expr);
-
-#[derive(Debug)]
-pub struct MatchBranch(Pattern, Expr);
-
-#[derive(Debug)]
-pub enum Statements {
-    Empty,
-    Sequence(Box<Expr>, Box<Statements>),
-    Let(Pattern, Box<Expr>, Box<Statements>),
-}
-
-#[derive(Debug)]
-pub enum Expr {
-    Constant(Constant),
-    Record(Vec<RecordField>),
-    FieldAccess(Box<Expr>, FieldName),
-    Variant(VariantName, Vec<Expr>),
-    Match(Box<Expr>, Vec<MatchBranch>),
-    Lambda(Vec<Pattern>, Box<Expr>),
-    Apply(Box<Expr>, Vec<Expr>),
-    Block(Statements),
-    Var(VarName),
-}
-
-#[derive(Debug)]
-pub enum Item {
-    Module(VarName, Vec<Item>),
-    Alias(VarName, Vec<VarName>),
-    ItemLet(VarName, Box<Expr>),
-}
-
-type Program = Vec<Item>;
+use crate::ast::*;
 
 fn unescape_chars(mut chars: Chars) -> String {
     let mut ret = String::new();
@@ -127,6 +73,9 @@ enum Token {
 
     #[token(":")]
     Colon,
+
+    #[token("_")]
+    Undescore,
 
     #[regex(r#""(?:[^"]|\\")*""#, unescape_string)]
     String(String),
@@ -326,6 +275,10 @@ fn parse_pattern(tokens: &mut &[TokenWithSpan]) -> Pattern {
             *tokens = rest;
             let fields = parse_record_pattern_body(tokens);
             Pattern::Record(fields)
+        }
+        [(Token::Undescore, _), rest @ ..] => {
+            *tokens = rest;
+            Pattern::Wildcard
         }
         _ => expected(
             "pattern of either a binding, a variant, or a record",

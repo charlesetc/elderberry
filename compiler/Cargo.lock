@@ -28,16 +28,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "dissimilar"
-version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "31ad93652f40969dead8d4bf897a41e9462095152eb21c56e5830537e41179dd"
-
-[[package]]
 name = "elderberry-compiler"
 version = "0.1.0"
 dependencies = [
- "expect-test",
  "insta",
  "logos",
  "logos-derive",
@@ -48,16 +41,6 @@ name = "encode_unicode"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a357d28ed41a50f9c765dbfe56cbc04a64e53e5fc58ba79fbc34c10ef3df831f"
-
-[[package]]
-name = "expect-test"
-version = "1.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ffc5e8bf4af3ae147a7797c5d0566d9f038e49179213e29f44ddb031aea96c7"
-dependencies = [
- "dissimilar",
- "once_cell",
-]
 
 [[package]]
 name = "fnv"
@@ -143,12 +126,6 @@ dependencies = [
  "syn",
  "utf8-ranges",
 ]
-
-[[package]]
-name = "once_cell"
-version = "1.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da32515d9f6e6e489d7bc9d84c71b060db7247dc035bbe44eac88cf87486d8d5"
 
 [[package]]
 name = "proc-macro2"
