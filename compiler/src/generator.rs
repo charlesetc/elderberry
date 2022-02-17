@@ -141,6 +141,7 @@ fn generate_expr(out: &mut String, expr: &Expr) {
             out.push_str("let _eldb_matched_expr =");
             generate_expr(out, matched_expr);
             out.push_str(";");
+            out.push_str("let res;");
             for MatchBranch(pattern, body_expr) in branches {
                 let captures = pattern.captures_in_order();
                 out.push_str("if (res = _eldb.matches(");
@@ -150,7 +151,7 @@ fn generate_expr(out: &mut String, expr: &Expr) {
                     out.push_str(capture);
                     out.push_str(",");
                 }
-                out.push_str("] = res;");
+                out.push_str("] = res; return ");
                 generate_expr(out, body_expr);
                 out.push_str("} else ")
             }
@@ -201,6 +202,7 @@ fn generate_toplevel_item(out: &mut String, item: &Item) {
 
 pub fn generate(ast: Program) -> String {
     let mut out = String::new();
+    out.push_str("import * as _eldb from \"./runtime/main.js\"");
     for item in ast {
         generate_toplevel_item(&mut out, &item)
     }

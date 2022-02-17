@@ -1,6 +1,9 @@
 let x = Hi
 let y = Yo
+
+let a = console.log({ x: x, y: y })
+
 let z = match x {
 	Hi -> 2,
-	Yo -> 3,
+	_ -> 3,
 }
