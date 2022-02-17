@@ -333,13 +333,12 @@ fn parse_match_body(tokens: &mut &[TokenWithSpan]) -> Vec<MatchBranch> {
 
 fn parse_statements(tokens: &mut &[TokenWithSpan]) -> Statements {
     match tokens {
-        [(Token::Let, _), rest @ ..] => {
+        [(Token::Let, _), (Token::LowerVar(var), _), rest @ ..] => {
             *tokens = rest;
-            let pat = parse_pattern(tokens);
             expect_and_consume(tokens, Token::Equals);
             let expr = parse_expression(tokens);
             let statements = parse_statements(tokens);
-            Statements::Let(pat, Box::new(expr), Box::new(statements))
+            Statements::Let(var.to_string(), Box::new(expr), Box::new(statements))
         }
         [(Token::CloseParen, _), rest @ ..] => {
             *tokens = rest;

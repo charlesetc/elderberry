@@ -53,3 +53,5 @@ export function matches(pattern, expression) {
 export function unhandled_match() {
   throw "unhandled match statement";
 }
+
+export const unit = [];

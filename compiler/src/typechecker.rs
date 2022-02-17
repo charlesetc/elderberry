@@ -249,11 +249,6 @@ fn generate_toplevel_item(out: &mut String, item: &Item) {
     }
 }
 
-pub fn generate(ast: Program) -> String {
-    let mut out = String::new();
-    out.push_str("import * as _eldb from \"./runtime/main.js\"");
-    for item in ast {
-        generate_toplevel_item(&mut out, &item)
-    }
-    out
+pub fn typecheck(ast: &Program)  {
+    unimplemented!()
 }

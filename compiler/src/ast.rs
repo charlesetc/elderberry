@@ -26,23 +26,28 @@ impl Pattern {
     fn captures_in_order_<'a>(
         self: &'a Self,
         mut out_vec: Vec<&'a VarName>,
-        mut out_set: HashSet<&'a VarName>) -> (Vec<&'a VarName>, HashSet<&'a VarName>) {
+        mut out_set: HashSet<&'a VarName>,
+    ) -> (Vec<&'a VarName>, HashSet<&'a VarName>) {
         let res = match self {
             Pattern::Variant(_, pats) => pats
                 .into_iter()
-                .fold((out_vec, out_set), |(out_vec, out_set), pat| pat.captures_in_order_(out_vec, out_set)),
-            Pattern::Record(fields) => fields
-                .into_iter()
-                .fold((out_vec, out_set), |(out_vec, out_set), RecordFieldPattern(_, pat)| {
+                .fold((out_vec, out_set), |(out_vec, out_set), pat| {
                     pat.captures_in_order_(out_vec, out_set)
                 }),
-            Pattern::Var(name) => { 
+            Pattern::Record(fields) => fields.into_iter().fold(
+                (out_vec, out_set),
+                |(out_vec, out_set), RecordFieldPattern(_, pat)| {
+                    pat.captures_in_order_(out_vec, out_set)
+                },
+            ),
+            Pattern::Var(name) => {
                 if out_set.contains(name) {
                     panic!("error: cannot bind the same name twice in a match statement!")
                 }
                 out_vec.push(name);
                 out_set.insert(name);
-                (out_vec, out_set)},
+                (out_vec, out_set)
+            }
             Pattern::Wildcard => (out_vec, out_set),
         };
         res
@@ -64,7 +69,7 @@ pub struct MatchBranch(pub Pattern, pub Expr);
 pub enum Statements {
     Empty,
     Sequence(Box<Expr>, Box<Statements>),
-    Let(Pattern, Box<Expr>, Box<Statements>),
+    Let(VarName, Box<Expr>, Box<Statements>),
 }
 
 #[derive(Debug, Clone)]

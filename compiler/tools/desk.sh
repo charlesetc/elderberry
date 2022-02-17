@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -eou pipefail
 mkdir -p target/elderberry
 cargo run -- example/desk.berry | js-beautify > target/elderberry/desk.js
 rsync -a runtime/ target/elderberry/runtime/

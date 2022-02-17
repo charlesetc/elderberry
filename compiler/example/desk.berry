@@ -1,9 +1,10 @@
 let x = Hi
 let y = Yo
 
-let a = console.log({ x: x, y: y })
+let f = |x, m| (
+	let y  = {test : m.concat(" wow!")}
+	console.log("hi there")
+	{ name: x, region: y}
+)
 
-let z = match x {
-	Hi -> 2,
-	_ -> 3,
-}
+let a = console.log(f(x, "hi"))
