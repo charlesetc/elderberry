@@ -11,8 +11,8 @@
 		{
 			"rust-analyzer":
 			{
-				"enabled": true
-			}
-		}
+				"enabled": false,
+			},
+		},
 	},
 }

@@ -1,4 +1,5 @@
 use crate::ast::*;
+use RecFlag::*;
 
 // analogous to parser::unescape_chars
 fn escape(s: &String) -> String {
@@ -38,7 +39,7 @@ fn generate_let(out: &mut String, name : &str, expr: &Expr) {
 fn generate_statements_(out: &mut String, statements: &Statements) {
     match statements {
         Statements::Empty => (),
-        Statements::Let(name, expr, substatements)
+        Statements::Let(Nonrecursive, name, expr, substatements)
             // TODO: How efficient is this?
             if (match **substatements {
                 Statements::Empty => true,
@@ -48,9 +49,12 @@ fn generate_statements_(out: &mut String, statements: &Statements) {
             generate_let(out, name, expr);
             out.push_str("return _eldb.unit;")
         }
-        Statements::Let(name, expr, statements) => {
+        Statements::Let(Nonrecursive, name, expr, statements) => {
             generate_let(out, name, &expr);
             generate_statements_(out, &statements);
+        }
+        Statements::Let(Recursive, _, _, _) => {
+            unimplemented!()
         }
         Statements::Sequence(expr, substatements)
             if (match **substatements {
@@ -239,12 +243,15 @@ fn generate_toplevel_item(out: &mut String, item: &Item) {
             out.push_str(&path.join("."));
             out.push_str(";")
         }
-        Item::ItemLet(name, expr) => {
+        Item::ItemLet(Nonrecursive, name, expr) => {
             out.push_str("let ");
             out.push_str(&name);
             out.push_str("=");
             generate_expr(out, &expr);
             out.push_str(";")
+        }
+        Item::ItemLet(Recursive, _, _) => {
+            unimplemented!()
         }
     }
 }

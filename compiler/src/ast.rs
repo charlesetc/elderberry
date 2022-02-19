@@ -66,10 +66,16 @@ pub struct RecordField(pub FieldName, pub Expr);
 pub struct MatchBranch(pub Pattern, pub Expr);
 
 #[derive(Debug, Clone)]
+pub enum RecFlag {
+    Recursive,
+    Nonrecursive,
+}
+
+#[derive(Debug, Clone)]
 pub enum Statements {
     Empty,
     Sequence(Box<Expr>, Box<Statements>),
-    Let(VarName, Box<Expr>, Box<Statements>),
+    Let(RecFlag, VarName, Box<Expr>, Box<Statements>),
 }
 
 #[derive(Debug, Clone)]
@@ -89,7 +95,7 @@ pub enum Expr {
 pub enum Item {
     Module(VarName, Vec<Item>),
     Alias(VarName, Vec<VarName>),
-    ItemLet(VarName, Box<Expr>),
+    ItemLet(RecFlag, VarName, Box<Expr>),
 }
 
 impl Item {
@@ -97,7 +103,7 @@ impl Item {
         match self {
             Item::Module(name, _) => name,
             Item::Alias(name, _) => name,
-            Item::ItemLet(name, _) => name,
+            Item::ItemLet(_, name, _) => name,
         }
     }
 }

@@ -2,6 +2,7 @@ use logos::{Lexer, Logos};
 use std::str::Chars;
 
 use crate::ast::*;
+use RecFlag::*;
 
 fn unescape_chars(mut chars: Chars) -> String {
     let mut ret = String::new();
@@ -15,7 +16,7 @@ fn unescape_chars(mut chars: Chars) -> String {
                 Some('"') => ret.push('\"'),
                 Some(d) => {
                     ret.push('\\');
-                    ret.push(d)
+                    ret.push(d);
                 }
             },
             _ => ret.push(c),
@@ -43,6 +44,9 @@ enum Token {
 
     #[token("let")]
     Let,
+
+    #[token("rec")]
+    Rec,
 
     #[token("(")]
     OpenParen,
@@ -338,7 +342,14 @@ fn parse_statements(tokens: &mut &[TokenWithSpan]) -> Statements {
             expect_and_consume(tokens, Token::Equals);
             let expr = parse_expression(tokens);
             let statements = parse_statements(tokens);
-            Statements::Let(var.to_string(), Box::new(expr), Box::new(statements))
+            Statements::Let(Nonrecursive, var.to_string(), Box::new(expr), Box::new(statements))
+        }
+        [(Token::Let, _), (Token::Rec, _), (Token::LowerVar(var), _), rest @ ..] => {
+            *tokens = rest;
+            expect_and_consume(tokens, Token::Equals);
+            let expr = parse_expression(tokens);
+            let statements = parse_statements(tokens);
+            Statements::Let(Recursive, var.to_string(), Box::new(expr), Box::new(statements))
         }
         [(Token::CloseParen, _), rest @ ..] => {
             *tokens = rest;
@@ -526,7 +537,12 @@ fn parse_item(tokens: &mut &[TokenWithSpan]) -> Option<Item> {
         [(Token::Let, _), (Token::LowerVar(name), _), (Token::Equals, _), rest @ ..] => {
             *tokens = rest;
             let expr = parse_expression(tokens);
-            Some(Item::ItemLet(name.to_string(), Box::new(expr)))
+            Some(Item::ItemLet(Nonrecursive, name.to_string(), Box::new(expr)))
+        }
+        [(Token::Let, _), (Token::Rec, _), (Token::LowerVar(name), _), (Token::Equals, _), rest @ ..] => {
+            *tokens = rest;
+            let expr = parse_expression(tokens);
+            Some(Item::ItemLet(Recursive, name.to_string(), Box::new(expr)))
         }
         _ => expected(
             "module alias, let statement, or module definition",
