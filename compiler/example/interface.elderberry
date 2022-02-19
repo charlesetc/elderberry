@@ -1,0 +1,39 @@
+
+data List(a) = Cons(a, list(a)) | Nil()
+
+// traits can be used as names for types
+// you can combine traits with `animal & iterable`
+
+trait animal {
+	name : string
+	walk() : unit
+	feed(food) : poo
+}
+
+impl animal for dog {
+	let name = "okay"
+
+	fn walk(self) {
+		self.feed(treat)
+	}
+
+	fn feed(self, food) {
+
+	}
+}
+
+impl animal for list(a : animal) {
+	fn walk(self) {
+		self.iter(|a| a.walk())
+	}
+}
+
+let x = List.empty()
+
+
+let snd = |x, y| y
+
+let main = (
+	let x = 2
+	snd({foo: {}}, Apple(a, b, c))
+)
