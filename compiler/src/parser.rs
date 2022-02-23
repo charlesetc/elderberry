@@ -48,6 +48,12 @@ enum Token {
     #[token("rec")]
     Rec,
 
+    #[token("true")]
+    True,
+
+    #[token("false")]
+    False,
+
     #[token("(")]
     OpenParen,
 
@@ -264,6 +270,32 @@ fn parse_comma_separated_patterns(tokens: &mut &[TokenWithSpan], until: Token) -
     ret
 }
 
+fn parse_constant(tokens: &mut &[TokenWithSpan]) -> Option<Constant> {
+    match tokens {
+        [(Token::String(str), _), rest @ ..] => {
+            *tokens = rest;
+            Some(Constant::String(str.to_string()))
+        }
+        [(Token::Int(i), _), rest @ ..] => {
+            *tokens = rest;
+            Some(Constant::Int(i.clone()))
+        }
+        [(Token::Float(f), _), rest @ ..] => {
+            *tokens = rest;
+            Some(Constant::Float(f.clone()))
+        }
+        [(Token::True, _), rest @ ..] => {
+            *tokens = rest;
+            Some(Constant::Bool(true))
+        }
+        [(Token::False, _), rest @ ..] => {
+            *tokens = rest;
+            Some(Constant::Bool(false))
+        }
+        _ => None,
+    }
+}
+
 fn parse_pattern(tokens: &mut &[TokenWithSpan]) -> Pattern {
     match tokens {
         [(Token::LowerVar(name), _), rest @ ..] => {
@@ -288,11 +320,14 @@ fn parse_pattern(tokens: &mut &[TokenWithSpan]) -> Pattern {
             *tokens = rest;
             Pattern::Wildcard
         }
-        _ => expected(
-            "pattern of either a binding, a variant, or a record",
-            3,
-            tokens,
-        ),
+        _ => match parse_constant(tokens) {
+            Some(constant) => Pattern::Constant(constant),
+            None => expected(
+                "pattern of either a binding, a variant, or a record",
+                3,
+                tokens,
+            ),
+        },
     }
 }
 
@@ -342,14 +377,24 @@ fn parse_statements(tokens: &mut &[TokenWithSpan]) -> Statements {
             expect_and_consume(tokens, Token::Equals);
             let expr = parse_expression(tokens);
             let statements = parse_statements(tokens);
-            Statements::Let(Nonrecursive, var.to_string(), Box::new(expr), Box::new(statements))
+            Statements::Let(
+                Nonrecursive,
+                var.to_string(),
+                Box::new(expr),
+                Box::new(statements),
+            )
         }
         [(Token::Let, _), (Token::Rec, _), (Token::LowerVar(var), _), rest @ ..] => {
             *tokens = rest;
             expect_and_consume(tokens, Token::Equals);
             let expr = parse_expression(tokens);
             let statements = parse_statements(tokens);
-            Statements::Let(Recursive, var.to_string(), Box::new(expr), Box::new(statements))
+            Statements::Let(
+                Recursive,
+                var.to_string(),
+                Box::new(expr),
+                Box::new(statements),
+            )
         }
         [(Token::CloseParen, _), rest @ ..] => {
             *tokens = rest;
@@ -365,18 +410,6 @@ fn parse_statements(tokens: &mut &[TokenWithSpan]) -> Statements {
 
 fn parse_expression_without_operators(tokens: &mut &[TokenWithSpan]) -> Expr {
     match tokens {
-        [(Token::String(str), _), rest @ ..] => {
-            *tokens = rest;
-            Expr::Constant(Constant::String(str.to_string()))
-        }
-        [(Token::Int(i), _), rest @ ..] => {
-            *tokens = rest;
-            Expr::Constant(Constant::Int(i.clone()))
-        }
-        [(Token::Float(f), _), rest @ ..] => {
-            *tokens = rest;
-            Expr::Constant(Constant::Float(f.clone()))
-        }
         [(Token::LowerVar(name), _), rest @ ..] => {
             *tokens = rest;
             Expr::Var(name.to_string())
@@ -413,7 +446,14 @@ fn parse_expression_without_operators(tokens: &mut &[TokenWithSpan]) -> Expr {
             let branches = parse_match_body(tokens);
             Expr::Match(Box::new(match_expr), branches)
         }
-        _ => expected("the start of an expression expression (one of `match`, `{`, `|`, a variable name, or a constant.)", 5, tokens),
+        _ => {
+            match parse_constant(tokens) {
+                Some(constant) => Expr::Constant(constant),
+                _ =>
+                expected("the start of an expression expression (one of `match`, `{`, `|`, a variable name, or a constant.)", 5, tokens),
+            }
+
+        }
     }
 }
 
@@ -537,9 +577,14 @@ fn parse_item(tokens: &mut &[TokenWithSpan]) -> Option<Item> {
         [(Token::Let, _), (Token::LowerVar(name), _), (Token::Equals, _), rest @ ..] => {
             *tokens = rest;
             let expr = parse_expression(tokens);
-            Some(Item::ItemLet(Nonrecursive, name.to_string(), Box::new(expr)))
+            Some(Item::ItemLet(
+                Nonrecursive,
+                name.to_string(),
+                Box::new(expr),
+            ))
         }
-        [(Token::Let, _), (Token::Rec, _), (Token::LowerVar(name), _), (Token::Equals, _), rest @ ..] => {
+        [(Token::Let, _), (Token::Rec, _), (Token::LowerVar(name), _), (Token::Equals, _), rest @ ..] =>
+        {
             *tokens = rest;
             let expr = parse_expression(tokens);
             Some(Item::ItemLet(Recursive, name.to_string(), Box::new(expr)))

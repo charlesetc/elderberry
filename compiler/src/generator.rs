@@ -102,6 +102,7 @@ fn generate_pattern(out: &mut String, pattern: &Pattern) {
         }
         Pattern::Var(_name) => out.push_str("\"__eldb_pat\""),
         Pattern::Wildcard => out.push_str("\"__eldb_wildcard\""),
+        Pattern::Constant(_) => unimplemented!(),
     }
 }
 
@@ -116,6 +117,7 @@ fn generate_expr(out: &mut String, expr: &Expr) {
     match expr {
         Expr::Constant(Constant::Int(i)) => out.push_str(&i.to_string()),
         Expr::Constant(Constant::Float(f)) => out.push_str(&f.to_string()),
+        Expr::Constant(Constant::Bool(b)) => out.push_str(&b.to_string()),
         Expr::Constant(Constant::String(s)) => {
             out.push_str("\"");
             out.push_str(&escape(s));

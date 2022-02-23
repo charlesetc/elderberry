@@ -5,6 +5,7 @@ pub enum Constant {
     Int(i64),
     Float(f64),
     String(String),
+    Bool(bool),
 }
 
 pub type VarName = String;
@@ -16,6 +17,7 @@ pub struct RecordFieldPattern(pub FieldName, pub Pattern);
 
 #[derive(Debug, Clone)]
 pub enum Pattern {
+    Constant(Constant),
     Variant(VariantName, Vec<Pattern>),
     Record(Vec<RecordFieldPattern>),
     Var(VarName),
@@ -48,7 +50,7 @@ impl Pattern {
                 out_set.insert(name);
                 (out_vec, out_set)
             }
-            Pattern::Wildcard => (out_vec, out_set),
+            (Pattern::Wildcard | Pattern::Constant(_)) => (out_vec, out_set),
         };
         res
     }
