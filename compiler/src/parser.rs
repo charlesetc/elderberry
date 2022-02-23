@@ -814,13 +814,14 @@ fn test_match() {
     insta::assert_debug_snapshot!(parse("let a = match b { x -> {} , Nice({ this: a }) -> {} }"), @r###"
     [
         ItemLet(
+            Nonrecursive,
             "a",
             Match(
                 Var(
                     "b",
                 ),
                 [
-                    MatchBranch(
+                    (
                         Var(
                             "x",
                         ),
@@ -828,13 +829,13 @@ fn test_match() {
                             [],
                         ),
                     ),
-                    MatchBranch(
+                    (
                         Variant(
                             "Nice",
                             [
                                 Record(
                                     [
-                                        RecordFieldPattern(
+                                        (
                                             "this",
                                             Var(
                                                 "a",

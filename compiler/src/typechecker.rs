@@ -59,6 +59,7 @@ impl Typechecker {
                     // self.constrain(arg2, arg1);
                     // self.constrain(*ret1, *ret2);
                 }
+                _ => unimplemented!()
             }
         }
     }
