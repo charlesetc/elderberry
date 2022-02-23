@@ -398,7 +398,7 @@ fn parse_statements(tokens: &mut &[TokenWithSpan]) -> Statements {
                 Box::new(statements),
             )
         }
-        [(Token::CloseParen, _), rest @ ..] => {
+        [(Token::CloseBrace, _), rest @ ..] => {
             *tokens = rest;
             Statements::Empty
         }
@@ -416,12 +416,17 @@ fn parse_expression_without_operators(tokens: &mut &[TokenWithSpan]) -> Expr {
             *tokens = rest;
             Expr::Var(name.to_string())
         }
-        [(Token::OpenBrace, _), rest @ ..] => {
+        [(Token::OpenBrace, _), rest @ ..] if
+            match rest { [(Token::LowerVar(_), _), (Token::Colon, _), ..] => true, _ => false }
+         => {
             *tokens = rest;
             let fields = parse_record_body(tokens);
             Expr::Record(fields)
         }
-        [(Token::OpenParen, _), rest @ ..] => {
+        [(Token::OpenBrace, _), (Token::Colon, _), (Token::CloseBrace, _), rest @ ..] => {
+            Expr::Record(vec![])
+        }
+        [(Token::OpenBrace, _), rest @ ..] => {
             *tokens = rest;
             let statements = parse_statements(tokens);
             Expr::Block(statements)
@@ -677,7 +682,7 @@ fn test_module_alias() {
 
 #[test]
 fn test_record() {
-    insta::assert_debug_snapshot!(parse("let x = { a: wow, b: {} }"), @r###"
+    insta::assert_debug_snapshot!(parse("let x = { a: wow, b: {:} }"), @r###"
     [
         ItemLet(
             Nonrecursive,
@@ -705,7 +710,7 @@ fn test_record() {
 
 #[test]
 fn test_field_access() {
-    insta::assert_debug_snapshot!(parse("let x = {}.bar.baz"), @r###"
+    insta::assert_debug_snapshot!(parse("let x = {:}.bar.baz"), @r###"
     [
         ItemLet(
             Nonrecursive,
@@ -768,8 +773,8 @@ fn test_variant() {
             Variant(
                 "Apple",
                 [
-                    Record(
-                        [],
+                    Block(
+                        Empty,
                     ),
                     Constant(
                         String(
@@ -811,7 +816,7 @@ fn test_match() {
         ),
     ]
     "###);
-    insta::assert_debug_snapshot!(parse("let a = match b { x -> {} , Nice({ this: a }) -> {} }"), @r###"
+    insta::assert_debug_snapshot!(parse("let a = match b { x -> {:} , Nice({ this: a }) -> {:} }"), @r###"
     [
         ItemLet(
             Nonrecursive,
@@ -883,7 +888,7 @@ fn test_lambda() {
 
 #[test]
 fn test_apply() {
-    insta::assert_debug_snapshot!(parse("let a = x(y).test({}, Test)"), @r###"
+    insta::assert_debug_snapshot!(parse("let a = x(y).test({:}, Test)"), @r###"
     [
         ItemLet(
             Nonrecursive,
@@ -921,12 +926,12 @@ fn test_apply() {
 fn test_block() {
     let parsed = parse(
         "
-    let a = |x| (
+    let a = |x| {
         let y = A
         wow
         let x = B
         x(y) 
-    )
+    }
     ",
     );
     insta::assert_debug_snapshot!(parsed, @r###"
