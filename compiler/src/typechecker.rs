@@ -1,5 +1,8 @@
 use crate::ast::*;
 use std::collections::HashMap;
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::primitive;
 use RecFlag::*;
 
 
@@ -13,7 +16,7 @@ enum Primitive {
 
 #[derive(Debug, Clone)]
 enum SimpleType {
-    Variable(VariableState),
+    Variable(Rc<RefCell<VariableState>>),
     Primitive(Primitive),
     Function(Box<SimpleType>, Box<SimpleType>),
     Record(Vec<(String, SimpleType)>),
@@ -28,7 +31,8 @@ struct VariableState {
 }
 
 fn fresh_var() -> SimpleType {
-    Variable(VariableState {lower_bounds: vec![], upper_bounds: vec![]})
+    let state = RefCell::new(VariableState {lower_bounds: vec![], upper_bounds: vec![]});
+    Variable(Rc::new(state))
 }
 
 fn error(str : String) -> ! {
@@ -38,18 +42,19 @@ fn error(str : String) -> ! {
     )
 }
 
-fn typecheck_expr<'a>(expr: &Expr, mut var_ctx : &'a HashMap<String, SimpleType>) -> &'a SimpleType {
+fn typecheck_expr<'a>(expr: &Expr, mut var_ctx : &'a HashMap<String, SimpleType>) -> SimpleType {
     use crate::ast::Constant::*;
     use Expr::*;
     match expr {
-        Constant(Bool(_)) => &Primitive(Primitive::Bool),
-        Constant(Int(_)) => &Primitive(Primitive::Int),
-        Constant(String(_)) => &Primitive(Primitive::String),
+        Constant(Bool(_)) => Primitive(Primitive::Bool),
+        Constant(Int(_)) => Primitive(Primitive::Int),
+        Constant(String(_)) => Primitive(Primitive::String),
         Var(name) => match var_ctx.get(name) {
-            Some(simpletype) => simpletype,
-            None => error(format!("variable \"{}\" not found", name))
+            Some(simpletype) => simpletype.clone(),
+            None => error(format!("variable \"{}\" not found", name)),
 
         },
+        Record(fields) => SimpleType::Record(fields.iter().map(|(name, expr)| (name.clone(), typecheck_expr(expr, var_ctx))).collect::<Vec<_>>()),
         _ => unimplemented!(),
     }
 }
