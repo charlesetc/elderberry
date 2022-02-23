@@ -38,23 +38,28 @@ fn error(str : String) -> ! {
     )
 }
 
-fn typecheck_expr(expr: &Expr, var_ctx : HashMap<String, SimpleType>) -> SimpleType {
+fn typecheck_expr<'a>(expr: &Expr, mut var_ctx : &'a HashMap<String, SimpleType>) -> &'a SimpleType {
     use crate::ast::Constant::*;
     use Expr::*;
     match expr {
-        Constant(Bool(_)) => Primitive(Primitive::Bool),
-        Constant(Int(_)) => Primitive(Primitive::Int),
-        Constant(String(_)) => Primitive(Primitive::String),
+        Constant(Bool(_)) => &Primitive(Primitive::Bool),
+        Constant(Int(_)) => &Primitive(Primitive::Int),
+        Constant(String(_)) => &Primitive(Primitive::String),
+        Var(name) => match var_ctx.get(name) {
+            Some(simpletype) => simpletype,
+            None => error(format!("variable \"{}\" not found", name))
+
+        },
         _ => unimplemented!(),
     }
 }
 
 pub fn typecheck(ast: &Program) {
-    let var_ctx = HashMap::new();
+    let mut var_ctx = HashMap::new();
     assert_eq!(ast.len(), 1);
     match ast.first() {
         Some(Item::ItemLet(Nonrecursive, _name, expr)) => {
-            let simple_type = typecheck_expr(&**expr, var_ctx);
+            let simple_type = typecheck_expr(&**expr, &mut var_ctx);
             println!("{:?}", simple_type)
 
         },

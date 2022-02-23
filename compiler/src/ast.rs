@@ -24,43 +24,6 @@ pub enum Pattern {
     Wildcard,
 }
 
-impl Pattern {
-    fn captures_in_order_<'a>(
-        self: &'a Self,
-        mut out_vec: Vec<&'a VarName>,
-        mut out_set: HashSet<&'a VarName>,
-    ) -> (Vec<&'a VarName>, HashSet<&'a VarName>) {
-        let res = match self {
-            Pattern::Variant(_, pats) => pats
-                .into_iter()
-                .fold((out_vec, out_set), |(out_vec, out_set), pat| {
-                    pat.captures_in_order_(out_vec, out_set)
-                }),
-            Pattern::Record(fields) => fields.into_iter().fold(
-                (out_vec, out_set),
-                |(out_vec, out_set), RecordFieldPattern(_, pat)| {
-                    pat.captures_in_order_(out_vec, out_set)
-                },
-            ),
-            Pattern::Var(name) => {
-                if out_set.contains(name) {
-                    panic!("error: cannot bind the same name twice in a match statement!")
-                }
-                out_vec.push(name);
-                out_set.insert(name);
-                (out_vec, out_set)
-            }
-            (Pattern::Wildcard | Pattern::Constant(_)) => (out_vec, out_set),
-        };
-        res
-    }
-
-    pub fn captures_in_order<'a>(self: &'a Self) -> Vec<&'a VarName> {
-        let (out_vec, _) = self.captures_in_order_(vec![], HashSet::new());
-        out_vec
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct RecordField(pub FieldName, pub Expr);
 
@@ -107,6 +70,43 @@ impl Item {
             Item::Alias(name, _) => name,
             Item::ItemLet(_, name, _) => name,
         }
+    }
+}
+
+impl Pattern {
+    fn captures_in_order_<'a>(
+        self: &'a Self,
+        mut out_vec: Vec<&'a VarName>,
+        mut out_set: HashSet<&'a VarName>,
+    ) -> (Vec<&'a VarName>, HashSet<&'a VarName>) {
+        let res = match self {
+            Pattern::Variant(_, pats) => pats
+                .into_iter()
+                .fold((out_vec, out_set), |(out_vec, out_set), pat| {
+                    pat.captures_in_order_(out_vec, out_set)
+                }),
+            Pattern::Record(fields) => fields.into_iter().fold(
+                (out_vec, out_set),
+                |(out_vec, out_set), RecordFieldPattern(_, pat)| {
+                    pat.captures_in_order_(out_vec, out_set)
+                },
+            ),
+            Pattern::Var(name) => {
+                if out_set.contains(name) {
+                    panic!("error: cannot bind the same name twice in a match statement!")
+                }
+                out_vec.push(name);
+                out_set.insert(name);
+                (out_vec, out_set)
+            }
+            (Pattern::Wildcard | Pattern::Constant(_)) => (out_vec, out_set),
+        };
+        res
+    }
+
+    pub fn captures_in_order<'a>(self: &'a Self) -> Vec<&'a VarName> {
+        let (out_vec, _) = self.captures_in_order_(vec![], HashSet::new());
+        out_vec
     }
 }
 
