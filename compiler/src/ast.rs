@@ -76,12 +76,11 @@ impl Pattern {
                 .fold((out_vec, out_set), |(out_vec, out_set), pat| {
                     pat.captures_in_order_(out_vec, out_set)
                 }),
-            Pattern::Record(fields) => fields.into_iter().fold(
-                (out_vec, out_set),
-                |(out_vec, out_set), (_, pat)| {
+            Pattern::Record(fields) => fields
+                .into_iter()
+                .fold((out_vec, out_set), |(out_vec, out_set), (_, pat)| {
                     pat.captures_in_order_(out_vec, out_set)
-                },
-            ),
+                }),
             Pattern::Var(name) => {
                 if out_set.contains(name) {
                     panic!("error: cannot bind the same name twice in a match statement!")
@@ -90,7 +89,7 @@ impl Pattern {
                 out_set.insert(name);
                 (out_vec, out_set)
             }
-            (Pattern::Wildcard | Pattern::Constant(_)) => (out_vec, out_set),
+            Pattern::Wildcard | Pattern::Constant(_) => (out_vec, out_set),
         };
         res
     }
