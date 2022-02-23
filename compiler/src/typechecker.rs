@@ -59,7 +59,6 @@ impl Typechecker {
                     // self.constrain(arg2, arg1);
                     // self.constrain(*ret1, *ret2);
                 }
-                _ => unimplemented!()
             }
         }
     }
@@ -76,10 +75,15 @@ impl Typechecker {
                 Some(simpletype) => simpletype.clone(),
                 None => error(format!("variable \"{}\" not found", name)),
             },
-            // TODO: This should be able to typecheck all the patterns
-            Lambda(Pattern::Var(name), expr) => {
-                let var_ctx = var_ctx.update(name.clone(), fresh_var());
-                self.typecheck_expr(expr, &var_ctx)
+            Lambda(args, expr) => {
+                match args.first() {
+                    Some(Pattern::Var(name)) => {
+                        let var_ctx = var_ctx.update(name.clone(), fresh_var());
+                        self.typecheck_expr(expr, &var_ctx)},
+                    _ => 
+                        // TODO: This should be able to typecheck all the patterns
+                        unimplemented!()
+                } 
             }
             Apply(f, args) => {
                 let return_type = fresh_var();

@@ -15,9 +15,8 @@ pub type VariantName = String;
 #[derive(Debug, Clone)]
 pub enum Pattern {
     Constant(Constant),
-    Variant(VariantName, Box<Pattern>),
+    Variant(VariantName, Vec<Pattern>),
     Record(Vec<(FieldName, Pattern)>),
-    Tuple(Vec<Pattern>),
     Var(VarName),
     Wildcard,
 }
@@ -40,10 +39,9 @@ pub enum Expr {
     Constant(Constant),
     Record(Vec<(FieldName, Expr)>),
     FieldAccess(Box<Expr>, FieldName),
-    Variant(VariantName, Box<Expr>),
-    Tuple(Vec<Expr>),
+    Variant(VariantName, Vec<Expr>),
     Match(Box<Expr>, Vec<(Pattern, Expr)>),
-    Lambda(Pattern, Box<Expr>),
+    Lambda(Vec<Pattern>, Box<Expr>),
     Apply(Box<Expr>, Vec<Expr>),
     Block(Statements),
     Var(VarName),
@@ -73,15 +71,14 @@ impl Pattern {
         mut out_set: HashSet<&'a VarName>,
     ) -> (Vec<&'a VarName>, HashSet<&'a VarName>) {
         let res = match self {
-            Pattern::Variant(_, pattern) => pattern.captures_in_order_(out_vec, out_set),
+            Pattern::Variant(_, pats) => pats
+                .into_iter()
+                .fold((out_vec, out_set), |(out_vec, out_set), pat| {
+                    pat.captures_in_order_(out_vec, out_set)
+                }),
             Pattern::Record(fields) => fields
                 .into_iter()
                 .fold((out_vec, out_set), |(out_vec, out_set), (_, pat)| {
-                    pat.captures_in_order_(out_vec, out_set)
-                }),
-            Pattern::Tuple(patterns) => patterns
-                .into_iter()
-                .fold((out_vec, out_set), |(out_vec, out_set), pat| {
                     pat.captures_in_order_(out_vec, out_set)
                 }),
             Pattern::Var(name) => {

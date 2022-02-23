@@ -60,12 +60,6 @@ enum Token {
     #[token(")")]
     CloseParen,
 
-    #[token("[")]
-    OpenSquare,
-
-    #[token("]")]
-    CloseSquare,
-
     #[token("{")]
     OpenBrace,
 
@@ -174,7 +168,9 @@ fn parse_record_body(tokens: &mut &[TokenWithSpan]) -> Vec<(FieldName, Expr)> {
     ret
 }
 
-fn parse_record_pattern_body_in_reverse(tokens: &mut &[TokenWithSpan]) -> Vec<(FieldName, Pattern)> {
+fn parse_record_pattern_body_in_reverse(
+    tokens: &mut &[TokenWithSpan],
+) -> Vec<(FieldName, Pattern)> {
     match tokens {
         [(Token::CloseBrace, _), rest @ ..] => {
             *tokens = rest;
@@ -209,7 +205,7 @@ fn parse_record_pattern_body(tokens: &mut &[TokenWithSpan]) -> Vec<(FieldName, P
     ret
 }
 
-fn parse_tuple_body_in_reverse(tokens: &mut &[TokenWithSpan]) -> Vec<Expr> {
+fn parse_variant_body_in_reverse(tokens: &mut &[TokenWithSpan]) -> Vec<Expr> {
     match tokens {
         [(Token::CloseParen, _), rest @ ..] => {
             *tokens = rest;
@@ -225,7 +221,7 @@ fn parse_tuple_body_in_reverse(tokens: &mut &[TokenWithSpan]) -> Vec<Expr> {
                 }
                 [(Token::Comma, _), rest @ ..] => {
                     *tokens = rest;
-                    let mut ret = parse_tuple_body_in_reverse(tokens);
+                    let mut ret = parse_variant_body_in_reverse(tokens);
                     ret.push(expr);
                     ret
                 }
@@ -235,10 +231,10 @@ fn parse_tuple_body_in_reverse(tokens: &mut &[TokenWithSpan]) -> Vec<Expr> {
     }
 }
 
-fn parse_tuple(tokens: &mut &[TokenWithSpan]) -> Expr {
-    let mut ret = parse_tuple_body_in_reverse(tokens);
+fn parse_variant_body(tokens: &mut &[TokenWithSpan]) -> Vec<Expr> {
+    let mut ret = parse_variant_body_in_reverse(tokens);
     ret.reverse();
-    Expr::Tuple(ret)
+    ret
 }
 
 fn parse_comma_separated_patterns_in_reverse(
@@ -276,11 +272,6 @@ fn parse_comma_separated_patterns(tokens: &mut &[TokenWithSpan], until: Token) -
     ret
 }
 
-fn parse_tuple_pattern(tokens: &mut &[TokenWithSpan]) -> Pattern {
-    let patterns = parse_comma_separated_patterns(tokens, Token::CloseParen);
-    Pattern::Tuple(patterns)
-}
-
 fn parse_constant(tokens: &mut &[TokenWithSpan]) -> Option<Constant> {
     match tokens {
         [(Token::String(str), _), rest @ ..] => {
@@ -313,18 +304,14 @@ fn parse_pattern(tokens: &mut &[TokenWithSpan]) -> Pattern {
             *tokens = rest;
             Pattern::Var(name.to_string())
         }
-        [ (Token::CapitalVar(name), _), (Token::OpenParen, _), rest @ .. ] => {
+        [(Token::CapitalVar(name), _), (Token::OpenParen, _), rest @ ..] => {
             *tokens = rest;
-            let pat = parse_tuple_pattern(tokens);
-            Pattern::Variant(name.to_string(), Box::new(pat))
-        } 
-        [(Token::OpenParen, _), rest @ ..] => {
-            *tokens = rest;
-            parse_tuple_pattern(tokens)
+            let pats = parse_comma_separated_patterns(tokens, Token::CloseParen);
+            Pattern::Variant(name.to_string(), pats)
         }
         [(Token::CapitalVar(name), _), rest @ ..] => {
             *tokens = rest;
-            Pattern::Variant(name.to_string(), Box::new(Pattern::Tuple(vec![])))
+            Pattern::Variant(name.to_string(), vec![])
         }
         [(Token::OpenBrace, _), rest @ ..] => {
             *tokens = rest;
@@ -411,7 +398,7 @@ fn parse_statements(tokens: &mut &[TokenWithSpan]) -> Statements {
                 Box::new(statements),
             )
         }
-        [(Token::CloseSquare, _), rest @ ..] => {
+        [(Token::CloseParen, _), rest @ ..] => {
             *tokens = rest;
             Statements::Empty
         }
@@ -434,25 +421,25 @@ fn parse_expression_without_operators(tokens: &mut &[TokenWithSpan]) -> Expr {
             let fields = parse_record_body(tokens);
             Expr::Record(fields)
         }
-        [(Token::OpenSquare, _), rest @ ..] => {
+        [(Token::OpenParen, _), rest @ ..] => {
             *tokens = rest;
             let statements = parse_statements(tokens);
             Expr::Block(statements)
         }
-        [(Token::CapitalVar(name), _), (Token::OpenParen, _ ), rest @ ..] => {
+        [(Token::CapitalVar(name), _), (Token::OpenParen, _), rest @ ..] => {
             *tokens = rest;
-            let expr = parse_tuple(tokens);
-            Expr::Variant(name.to_string(), Box::new(expr))
+            let exprs = parse_variant_body(tokens);
+            Expr::Variant(name.to_string(), exprs)
         }
         [(Token::CapitalVar(name), _), rest @ ..] => {
             *tokens = rest;
-            Expr::Variant(name.to_string(), Box::new(Expr::Tuple(vec![])))
+            Expr::Variant(name.to_string(), vec![])
         }
         [(Token::Pipe, _), rest @ ..] => {
             *tokens = rest;
             let patterns = parse_comma_separated_patterns(tokens, Token::Pipe);
             let expression = parse_expression(tokens);
-            Expr::Lambda(Pattern::Tuple(patterns), Box::new(expression))
+            Expr::Lambda(patterns, Box::new(expression))
         }
         [(Token::Match, _), rest @ ..] => {
             *tokens = rest;
@@ -780,34 +767,28 @@ fn test_variant() {
             "a",
             Variant(
                 "Apple",
-                Tuple(
-                    [
-                        Record(
-                            [],
+                [
+                    Record(
+                        [],
+                    ),
+                    Constant(
+                        String(
+                            "hi",
                         ),
-                        Constant(
-                            String(
-                                "hi",
+                    ),
+                    Variant(
+                        "Sweet",
+                        [
+                            Var(
+                                "wow",
                             ),
-                        ),
-                        Variant(
-                            "Sweet",
-                            Tuple(
-                                [
-                                    Var(
-                                        "wow",
-                                    ),
-                                ],
-                            ),
-                        ),
-                        Variant(
-                            "Blue",
-                            Tuple(
-                                [],
-                            ),
-                        ),
-                    ],
-                ),
+                        ],
+                    ),
+                    Variant(
+                        "Blue",
+                        [],
+                    ),
+                ],
             ),
         ),
     ]
@@ -833,14 +814,13 @@ fn test_match() {
     insta::assert_debug_snapshot!(parse("let a = match b { x -> {} , Nice({ this: a }) -> {} }"), @r###"
     [
         ItemLet(
-            Nonrecursive,
             "a",
             Match(
                 Var(
                     "b",
                 ),
                 [
-                    (
+                    MatchBranch(
                         Var(
                             "x",
                         ),
@@ -848,23 +828,21 @@ fn test_match() {
                             [],
                         ),
                     ),
-                    (
+                    MatchBranch(
                         Variant(
                             "Nice",
-                            Tuple(
-                                [
-                                    Record(
-                                        [
-                                            (
-                                                "this",
-                                                Var(
-                                                    "a",
-                                                ),
+                            [
+                                Record(
+                                    [
+                                        RecordFieldPattern(
+                                            "this",
+                                            Var(
+                                                "a",
                                             ),
-                                        ],
-                                    ),
-                                ],
-                            ),
+                                        ),
+                                    ],
+                                ),
+                            ],
                         ),
                         Record(
                             [],
@@ -885,16 +863,14 @@ fn test_lambda() {
             Nonrecursive,
             "fst",
             Lambda(
-                Tuple(
-                    [
-                        Var(
-                            "x",
-                        ),
-                        Var(
-                            "y",
-                        ),
-                    ],
-                ),
+                [
+                    Var(
+                        "x",
+                    ),
+                    Var(
+                        "y",
+                    ),
+                ],
                 Var(
                     "x",
                 ),
@@ -931,9 +907,7 @@ fn test_apply() {
                     ),
                     Variant(
                         "Test",
-                        Tuple(
-                            [],
-                        ),
+                        [],
                     ),
                 ],
             ),
