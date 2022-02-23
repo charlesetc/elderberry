@@ -81,15 +81,20 @@ fn generate_statements(out: &mut String, statements: &Statements) {
 
 fn generate_pattern(out: &mut String, pattern: &Pattern) {
     match pattern {
-        Pattern::Variant(name, args) => {
+        Pattern::Variant(name, arg) => {
             out.push_str("{");
             out.push_str(name);
-            out.push_str(":[");
+            out.push_str(":");
+            generate_pattern(out, arg);
+            out.push_str("}");
+        }
+        Pattern::Tuple(args) => {
+            out.push_str("[");
             for arg in args {
                 generate_pattern(out, arg);
                 out.push_str(",");
             }
-            out.push_str("]}");
+            out.push_str("]");
         }
         Pattern::Record(fields) => {
             out.push_str("{");
@@ -103,13 +108,6 @@ fn generate_pattern(out: &mut String, pattern: &Pattern) {
         Pattern::Var(_name) => out.push_str("\"__eldb_pat\""),
         Pattern::Wildcard => out.push_str("\"__eldb_wildcard\""),
         Pattern::Constant(_) => unimplemented!(),
-    }
-}
-
-mod helpers {
-    pub fn push_var(out: &mut String, i: usize) {
-        out.push_str("_eldb_a");
-        out.push_str(&i.to_string());
     }
 }
 
@@ -134,15 +132,20 @@ fn generate_expr(out: &mut String, expr: &Expr) {
             }
             out.push_str("}");
         }
-        Expr::Variant(name, fields) => {
+        Expr::Variant(name, expr) => {
             out.push_str("{");
             out.push_str(name);
-            out.push_str(": [");
+            out.push_str(":");
+            generate_expr(out, expr);
+            out.push_str("}");
+        }
+        Expr::Tuple(fields) => {
+            out.push_str("[");
             for expr in fields {
                 generate_expr(out, expr);
                 out.push_str(",");
             }
-            out.push_str("]}");
+            out.push_str("]");
         }
         Expr::FieldAccess(expr, name) => {
             // TODO: Maybe these "("'s are not necessary.
@@ -161,33 +164,24 @@ fn generate_expr(out: &mut String, expr: &Expr) {
             out.push_str(")");
         }
         Expr::Block(statements) => generate_statements(out, statements),
-        Expr::Lambda(patterns, body) => {
-            out.push_str("((");
-            for (i, _pattern) in patterns.into_iter().enumerate() {
-                helpers::push_var(out, i);
-                out.push_str(",");
-            }
+        Expr::Lambda(pattern, body) => {
+            out.push_str("(_eldb_arg");
             out.push_str(") => {");
             out.push_str("let _eldb_res;");
-            for (i, pattern) in patterns.into_iter().enumerate() {
-                let captures = pattern.captures_in_order();
-                out.push_str("if (_eldb_res = _eldb.matches(");
-                generate_pattern(out, pattern);
+
+            let captures = pattern.captures_in_order();
+            out.push_str("if (_eldb_res = _eldb.matches(");
+            generate_pattern(out, pattern);
+            out.push_str(", _eldb_arg)) { let [");
+            for capture in captures {
+                out.push_str(capture);
                 out.push_str(",");
-                helpers::push_var(out, i);
-                out.push_str(")) { let [");
-                for capture in captures {
-                    out.push_str(capture);
-                    out.push_str(",");
-                }
-                out.push_str("] = _eldb_res;");
             }
+            out.push_str("] = _eldb_res;");
+
             out.push_str("return ");
             generate_expr(out, body);
-            out.push_str(";");
-            for (_, _) in patterns.into_iter().enumerate() {
-                out.push_str("}");
-            }
+            out.push_str(";}");
             out.push_str("_eldb.unhandled_match()");
             out.push_str("})");
         }
