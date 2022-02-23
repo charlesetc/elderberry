@@ -56,12 +56,6 @@ fn typecheck_expr(expr: &Expr, var_ctx: &HashMap<String, SimpleType>) -> SimpleT
             Some(simpletype) => simpletype.clone(),
             None => error(format!("variable \"{}\" not found", name)),
         },
-        Record(fields) => SimpleType::Record(
-            fields
-                .iter()
-                .map(|(name, expr)| (name.clone(), typecheck_expr(expr, &var_ctx)))
-                .collect::<Vec<_>>(),
-        ),
         Lambda(args, expr) => {
             match args.first() {
                 Some(Pattern::Var(name)) => {
@@ -77,6 +71,17 @@ fn typecheck_expr(expr: &Expr, var_ctx: &HashMap<String, SimpleType>) -> SimpleT
             let arg_types = args.iter().map(|arg| typecheck_expr(arg, var_ctx)).collect::<Vec<_>>();
             let f_type = Function(arg_types, Box::new(return_type.clone()));
             constrain(typecheck_expr(f, var_ctx), f_type);
+            return_type
+        }
+        Record(fields) => SimpleType::Record(
+            fields
+                .iter()
+                .map(|(name, expr)| (name.clone(), typecheck_expr(expr, &var_ctx)))
+                .collect::<Vec<_>>(),
+        ),
+        FieldAccess(expr, name) => {
+            let return_type = fresh_var();
+            constrain(typecheck_expr(expr, var_ctx), SimpleType::Record(vec![(name.clone(), return_type.clone())]));
             return_type
         }
         _ => unimplemented!(),
