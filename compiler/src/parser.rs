@@ -133,7 +133,7 @@ fn expect_and_consume(tokens: &mut &[TokenWithSpan], token: Token) {
     }
 }
 
-fn parse_record_body_in_reverse(tokens: &mut &[TokenWithSpan]) -> Vec<RecordField> {
+fn parse_record_body_in_reverse(tokens: &mut &[TokenWithSpan]) -> Vec<(FieldName, Expr)> {
     match tokens {
         [(Token::CloseBrace, _), rest @ ..] => {
             *tokens = rest;
@@ -142,7 +142,7 @@ fn parse_record_body_in_reverse(tokens: &mut &[TokenWithSpan]) -> Vec<RecordFiel
         [(Token::LowerVar(field_name), _), (Token::Colon, _), rest @ ..] => {
             *tokens = rest;
             let expr = parse_expression(tokens);
-            let field = RecordField(field_name.to_string(), expr);
+            let field = (field_name.to_string(), expr);
             // gotta eagerly grab that comma
             match tokens {
                 [(Token::CloseBrace, _), rest @ ..] => {
@@ -162,13 +162,13 @@ fn parse_record_body_in_reverse(tokens: &mut &[TokenWithSpan]) -> Vec<RecordFiel
     }
 }
 
-fn parse_record_body(tokens: &mut &[TokenWithSpan]) -> Vec<RecordField> {
+fn parse_record_body(tokens: &mut &[TokenWithSpan]) -> Vec<(FieldName, Expr)> {
     let mut ret = parse_record_body_in_reverse(tokens);
     ret.reverse();
     ret
 }
 
-fn parse_record_pattern_body_in_reverse(tokens: &mut &[TokenWithSpan]) -> Vec<RecordFieldPattern> {
+fn parse_record_pattern_body_in_reverse(tokens: &mut &[TokenWithSpan]) -> Vec<(FieldName, Pattern)> {
     match tokens {
         [(Token::CloseBrace, _), rest @ ..] => {
             *tokens = rest;
@@ -177,7 +177,7 @@ fn parse_record_pattern_body_in_reverse(tokens: &mut &[TokenWithSpan]) -> Vec<Re
         [(Token::LowerVar(field_name), _), (Token::Colon, _), rest @ ..] => {
             *tokens = rest;
             let pat = parse_pattern(tokens);
-            let field = RecordFieldPattern(field_name.to_string(), pat);
+            let field = (field_name.to_string(), pat);
             // gotta eagerly grab that comma
             match tokens {
                 [(Token::CloseBrace, _), rest @ ..] => {
@@ -197,7 +197,7 @@ fn parse_record_pattern_body_in_reverse(tokens: &mut &[TokenWithSpan]) -> Vec<Re
     }
 }
 
-fn parse_record_pattern_body(tokens: &mut &[TokenWithSpan]) -> Vec<RecordFieldPattern> {
+fn parse_record_pattern_body(tokens: &mut &[TokenWithSpan]) -> Vec<(FieldName, Pattern)> {
     let mut ret = parse_record_pattern_body_in_reverse(tokens);
     ret.reverse();
     ret
@@ -331,14 +331,14 @@ fn parse_pattern(tokens: &mut &[TokenWithSpan]) -> Pattern {
     }
 }
 
-fn parse_match_branch(tokens: &mut &[TokenWithSpan]) -> MatchBranch {
+fn parse_match_branch(tokens: &mut &[TokenWithSpan]) -> (Pattern, Expr) {
     let pattern = parse_pattern(tokens);
     expect_and_consume(tokens, Token::Arrow);
     let expr = parse_expression(tokens);
-    MatchBranch(pattern, expr)
+    (pattern, expr)
 }
 
-fn parse_match_body_in_reverse(tokens: &mut &[TokenWithSpan]) -> Vec<MatchBranch> {
+fn parse_match_body_in_reverse(tokens: &mut &[TokenWithSpan]) -> Vec<(Pattern, Expr)> {
     match tokens {
         [(Token::CloseBrace, _), rest @ ..] => {
             *tokens = rest;
@@ -364,7 +364,7 @@ fn parse_match_body_in_reverse(tokens: &mut &[TokenWithSpan]) -> Vec<MatchBranch
     }
 }
 
-fn parse_match_body(tokens: &mut &[TokenWithSpan]) -> Vec<MatchBranch> {
+fn parse_match_body(tokens: &mut &[TokenWithSpan]) -> Vec<(Pattern, Expr)> {
     let mut ret = parse_match_body_in_reverse(tokens);
     ret.reverse();
     ret
@@ -661,6 +661,7 @@ fn test_module_alias() {
     insta::assert_debug_snapshot!(parse("let x = \"hi\""), @r###"
     [
         ItemLet(
+            Nonrecursive,
             "x",
             Constant(
                 String(
@@ -677,16 +678,17 @@ fn test_record() {
     insta::assert_debug_snapshot!(parse("let x = { a: wow, b: {} }"), @r###"
     [
         ItemLet(
+            Nonrecursive,
             "x",
             Record(
                 [
-                    RecordField(
+                    (
                         "a",
                         Var(
                             "wow",
                         ),
                     ),
-                    RecordField(
+                    (
                         "b",
                         Record(
                             [],
@@ -704,6 +706,7 @@ fn test_field_access() {
     insta::assert_debug_snapshot!(parse("let x = {}.bar.baz"), @r###"
     [
         ItemLet(
+            Nonrecursive,
             "x",
             FieldAccess(
                 FieldAccess(
@@ -724,6 +727,7 @@ fn test_numbers() {
     insta::assert_debug_snapshot!(parse(r#"let s = 2"#), @r###"
     [
         ItemLet(
+            Nonrecursive,
             "s",
             Constant(
                 Int(
@@ -740,6 +744,7 @@ fn test_string() {
     insta::assert_debug_snapshot!(parse(r#"let s =  "beginning \"of\" \\the string\\ \n \t right? " "#), @r###"
     [
         ItemLet(
+            Nonrecursive,
             "s",
             Constant(
                 String(
@@ -756,6 +761,7 @@ fn test_variant() {
     insta::assert_debug_snapshot!(parse(r#"let a = Apple({}, "hi", Sweet(wow), Blue)"#), @r###"
     [
         ItemLet(
+            Nonrecursive,
             "a",
             Variant(
                 "Apple",
@@ -792,6 +798,7 @@ fn test_match() {
     insta::assert_debug_snapshot!(parse("let a = match b {}"), @r###"
     [
         ItemLet(
+            Nonrecursive,
             "a",
             Match(
                 Var(
@@ -851,6 +858,7 @@ fn test_lambda() {
     insta::assert_debug_snapshot!(parse("let fst = |x, y| x "), @r###"
     [
         ItemLet(
+            Nonrecursive,
             "fst",
             Lambda(
                 [
@@ -875,6 +883,7 @@ fn test_apply() {
     insta::assert_debug_snapshot!(parse("let a = x(y).test({}, Test)"), @r###"
     [
         ItemLet(
+            Nonrecursive,
             "a",
             Apply(
                 FieldAccess(
@@ -920,6 +929,7 @@ fn test_block() {
     insta::assert_debug_snapshot!(parsed, @r###"
     [
         ItemLet(
+            Nonrecursive,
             "a",
             Lambda(
                 [
@@ -929,9 +939,8 @@ fn test_block() {
                 ],
                 Block(
                     Let(
-                        Var(
-                            "y",
-                        ),
+                        Nonrecursive,
+                        "y",
                         Variant(
                             "A",
                             [],
@@ -941,9 +950,8 @@ fn test_block() {
                                 "wow",
                             ),
                             Let(
-                                Var(
-                                    "x",
-                                ),
+                                Nonrecursive,
+                                "x",
                                 Variant(
                                     "B",
                                     [],

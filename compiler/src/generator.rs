@@ -93,7 +93,7 @@ fn generate_pattern(out: &mut String, pattern: &Pattern) {
         }
         Pattern::Record(fields) => {
             out.push_str("{");
-            for RecordFieldPattern(name, pattern) in fields {
+            for (name, pattern) in fields {
                 out.push_str(&name);
                 out.push_str(":");
                 generate_pattern(out, &pattern);
@@ -126,7 +126,7 @@ fn generate_expr(out: &mut String, expr: &Expr) {
         Expr::Var(x) => out.push_str(&x),
         Expr::Record(fields) => {
             out.push_str("{");
-            for RecordField(name, expr) in fields {
+            for (name, expr) in fields {
                 out.push_str(name);
                 out.push_str(":");
                 generate_expr(out, expr);
@@ -197,7 +197,7 @@ fn generate_expr(out: &mut String, expr: &Expr) {
             generate_expr(out, matched_expr);
             out.push_str(";");
             out.push_str("let _eldb_res;");
-            for MatchBranch(pattern, body) in branches {
+            for (pattern, body) in branches {
                 let captures = pattern.captures_in_order();
                 out.push_str("if (_eldb_res = _eldb.matches(");
                 generate_pattern(out, pattern);

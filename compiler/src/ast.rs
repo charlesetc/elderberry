@@ -13,22 +13,13 @@ pub type FieldName = String;
 pub type VariantName = String;
 
 #[derive(Debug, Clone)]
-pub struct RecordFieldPattern(pub FieldName, pub Pattern);
-
-#[derive(Debug, Clone)]
 pub enum Pattern {
     Constant(Constant),
     Variant(VariantName, Vec<Pattern>),
-    Record(Vec<RecordFieldPattern>),
+    Record(Vec<(FieldName, Pattern)>),
     Var(VarName),
     Wildcard,
 }
-
-#[derive(Debug, Clone)]
-pub struct RecordField(pub FieldName, pub Expr);
-
-#[derive(Debug, Clone)]
-pub struct MatchBranch(pub Pattern, pub Expr);
 
 #[derive(Debug, Clone)]
 pub enum RecFlag {
@@ -46,10 +37,10 @@ pub enum Statements {
 #[derive(Debug, Clone)]
 pub enum Expr {
     Constant(Constant),
-    Record(Vec<RecordField>),
+    Record(Vec<(FieldName, Expr)>),
     FieldAccess(Box<Expr>, FieldName),
     Variant(VariantName, Vec<Expr>),
-    Match(Box<Expr>, Vec<MatchBranch>),
+    Match(Box<Expr>, Vec<(Pattern, Expr)>),
     Lambda(Vec<Pattern>, Box<Expr>),
     Apply(Box<Expr>, Vec<Expr>),
     Block(Statements),
@@ -87,7 +78,7 @@ impl Pattern {
                 }),
             Pattern::Record(fields) => fields.into_iter().fold(
                 (out_vec, out_set),
-                |(out_vec, out_set), RecordFieldPattern(_, pat)| {
+                |(out_vec, out_set), (_, pat)| {
                     pat.captures_in_order_(out_vec, out_set)
                 },
             ),
