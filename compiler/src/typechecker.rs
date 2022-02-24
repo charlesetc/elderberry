@@ -81,10 +81,20 @@ impl Typechecker {
                         }
                     }
                 }
-                (Variable(subtype_state), supertype) => {
-                    subtype_state.borrow_mut().lower_bounds.insert(Rc::new(supertype.clone()));
+                (Variable(variable_state), _) => {
+                    variable_state.borrow_mut().upper_bounds.insert(supertype.clone());
+                    for lower_bound in variable_state.borrow().lower_bounds.iter() {
+                        self.constrain(lower_bound.clone(), supertype.clone())
+                    }
                 }
-                _ => unimplemented!(),
+                (_, Variable(variable_state)) => {
+                    variable_state.borrow_mut().lower_bounds.insert(subtype.clone());
+                    for upper_bound in variable_state.borrow().upper_bounds.iter() {
+                        self.constrain(subtype.clone(), upper_bound.clone())
+                    }
+
+                }
+                _ => type_error(format!("cannot constrain {:?} <: {:?}", subtype, supertype)),
             }
         }
     }
@@ -153,4 +163,14 @@ pub fn typecheck(ast: &Program) {
         }
         _ => unimplemented!(),
     }
+}
+
+
+fn test(source: &str) -> SimpleType {
+    unimplemented!()
+}
+
+#[test]
+fn test_module_alias() {
+    insta::assert_debug_snapshot!(test("module X = B module C = B.Y"), @r###""###);
 }
