@@ -424,6 +424,7 @@ fn parse_expression_without_operators(tokens: &mut &[TokenWithSpan]) -> Expr {
             Expr::Record(fields)
         }
         [(Token::OpenBrace, _), (Token::Colon, _), (Token::CloseBrace, _), rest @ ..] => {
+            *tokens = rest;
             Expr::Record(vec![])
         }
         [(Token::OpenBrace, _), rest @ ..] => {

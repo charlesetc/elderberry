@@ -1,6 +1,6 @@
 use crate::ast::*;
-use std::cell::RefCell;
 use im::HashMap;
+use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::rc::Rc;
 use RecFlag::*;
@@ -37,29 +37,43 @@ fn fresh_var() -> SimpleType {
     Variable(Rc::new(state))
 }
 
-fn error(str: String) -> ! {
+fn type_error(str: String) -> ! {
     panic!("type error: {}", str)
 }
 
 struct Typechecker {
-    constraint_cache : RefCell<BTreeSet<(SimpleType, SimpleType)>>
+    constraint_cache: RefCell<BTreeSet<(SimpleType, SimpleType)>>,
 }
 
 impl Typechecker {
-
     fn new() -> Self {
-        Typechecker { constraint_cache: RefCell::new(BTreeSet::new()) }
+        Typechecker {
+            constraint_cache: RefCell::new(BTreeSet::new()),
+        }
     }
 
-    fn constrain(&self, subtype : SimpleType, supertype : SimpleType) {
-        if self.constraint_cache.borrow_mut().insert((subtype.clone(), supertype.clone())) {
+    fn constrain(&self, subtype: &SimpleType, supertype: &SimpleType) {
+        if self
+            .constraint_cache
+            .borrow_mut()
+            .insert((subtype.clone(), supertype.clone()))
+        {
             match (subtype, supertype) {
                 (Primitive(n1), Primitive(n2)) if n1 == n2 => (), // all good
-                (Function(arg1, ret1), Function(arg2, ret2)) => {
-                    // self.constrain(arg2, arg1);
-                    // self.constrain(*ret1, *ret2);
+                (Function(args1, ret1), Function(args2, ret2)) => {
+                    if args1.len() != args2.len() {
+                        type_error(format!(
+                            "called function with {} arguments, but it only takes {}",
+                            args2.len(),
+                            args1.len()
+                        ));
+                    }
+                    for (arg1, arg2) in args1.iter().zip(args2.iter()) {
+                        self.constrain(arg2, arg1);
+                    }
+                    self.constrain(ret1, ret2);
                 }
-                _ => unimplemented!()
+                _ => unimplemented!(),
             }
         }
     }
@@ -74,23 +88,29 @@ impl Typechecker {
             Constant(Float(_)) => Primitive(Primitive::Float),
             Var(name) => match var_ctx.get(name) {
                 Some(simpletype) => simpletype.clone(),
-                None => error(format!("variable \"{}\" not found", name)),
+                None => type_error(format!("variable \"{}\" not found", name)),
             },
             Lambda(args, expr) => {
                 match args.first() {
                     Some(Pattern::Var(name)) => {
                         let var_ctx = var_ctx.update(name.clone(), fresh_var());
-                        self.typecheck_expr(expr, &var_ctx)},
-                    _ => 
-                        // TODO: This should be able to typecheck all the patterns
+                        self.typecheck_expr(expr, &var_ctx)
+                    }
+                    _ =>
+                    // TODO: This should be able to typecheck all the patterns
+                    {
                         unimplemented!()
-                } 
+                    }
+                }
             }
             Apply(f, args) => {
                 let return_type = fresh_var();
-                let arg_types = args.iter().map(|arg| self.typecheck_expr(arg, var_ctx)).collect::<Vec<_>>();
+                let arg_types = args
+                    .iter()
+                    .map(|arg| self.typecheck_expr(arg, var_ctx))
+                    .collect::<Vec<_>>();
                 let f_type = Function(arg_types, Box::new(return_type.clone()));
-                self.constrain(self.typecheck_expr(f, var_ctx), f_type);
+                self.constrain(&self.typecheck_expr(f, var_ctx), &f_type);
                 return_type
             }
             Record(fields) => SimpleType::Record(
@@ -101,7 +121,10 @@ impl Typechecker {
             ),
             FieldAccess(expr, name) => {
                 let return_type = fresh_var();
-                self.constrain(self.typecheck_expr(expr, var_ctx), SimpleType::Record(vec![(name.clone(), return_type.clone())]));
+                self.constrain(
+                    &self.typecheck_expr(expr, var_ctx),
+                    &SimpleType::Record(vec![(name.clone(), return_type.clone())]),
+                );
                 return_type
             }
             _ => unimplemented!(),
