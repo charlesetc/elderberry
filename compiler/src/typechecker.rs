@@ -18,7 +18,7 @@ enum SimpleType {
     Variable(Rc<RefCell<VariableState>>),
     Primitive(Primitive),
     Function(Vec<SimpleType>, Box<SimpleType>),
-    Record(Vec<(String, SimpleType)>),
+    Record(HashMap<String, SimpleType>),
 }
 
 use SimpleType::*;
@@ -73,6 +73,14 @@ impl Typechecker {
                     }
                     self.constrain(ret1, ret2);
                 }
+                (Record(fields1), Record(fields2)) => {
+                    for (field, value2) in fields2.iter() {
+                        match fields1.get(field) {
+                            Some(value1) => self.constrain(value1, value2),
+                            None => type_error(format!("missing field {}", field))
+                        }
+                    }
+                }
                 _ => unimplemented!(),
             }
         }
@@ -117,13 +125,13 @@ impl Typechecker {
                 fields
                     .iter()
                     .map(|(name, expr)| (name.clone(), self.typecheck_expr(expr, &var_ctx)))
-                    .collect::<Vec<_>>(),
+                    .collect::<HashMap<_, _>>(),
             ),
             FieldAccess(expr, name) => {
                 let return_type = fresh_var();
                 self.constrain(
                     &self.typecheck_expr(expr, var_ctx),
-                    &SimpleType::Record(vec![(name.clone(), return_type.clone())]),
+                    &SimpleType::Record(im::hashmap!{name.clone() => return_type.clone()}),
                 );
                 return_type
             }
