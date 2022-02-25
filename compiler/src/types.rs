@@ -175,6 +175,6 @@ impl SimpleType {
 
     pub fn coalesce(simple_type: Rc<Self>) -> AstType {
         let recursive_variables = Rc::new(RefCell::new(MutMap::new()));
-        SimpleType::coalesce_(simple_type, recursive_variables, false, ImSet::new())
+        SimpleType::coalesce_(simple_type, recursive_variables, true, ImSet::new())
     }
 }

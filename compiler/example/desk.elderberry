@@ -1,10 +1,11 @@
-let x = Hi
-let y = Yo
+let x = |y| |x| y(x)
 
-let f = |x, m| (
+/* let y = Yo
+
+  let f = |x, m| {
 	let y  = {test : m.concat(" wow!")}
 	console.log("hi there")
 	{ name: x, region: y}
-)
 
-let a = console.log(f(x, "hi"))
+  let a = console.log(f(x, "hi"))
+*/

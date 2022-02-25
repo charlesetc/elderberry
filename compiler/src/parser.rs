@@ -87,6 +87,12 @@ enum Token {
     #[token("_")]
     Undescore,
 
+    #[token("/*")]
+    OpenComment,
+
+    #[token("*/")]
+    CloseComment,
+
     #[regex(r#""(?:[^"]|\\")*""#, unescape_string)]
     String(String),
 
@@ -605,8 +611,31 @@ fn parse_item(tokens: &mut &[TokenWithSpan]) -> Option<Item> {
     }
 }
 
+fn remove_comments(tokens: Vec<TokenWithSpan>) -> Vec<TokenWithSpan> {
+    let mut depth = 0;
+    tokens
+        .into_iter()
+        .filter_map(|token_with_span| {
+            match token_with_span {
+                (Token::OpenComment, _) => {
+                    depth += 1;
+                    None
+                }
+                (Token::CloseComment, _) => {
+                    depth -= 1;
+                    None
+                }
+                (token, span) => if depth > 0 {
+                    None
+                } else { Some((token, span)) }
+            }
+        })
+        .collect()
+}
+
 pub fn parse(source: &str) -> Program {
     let tokens = Token::tokenize(source);
+    let tokens = remove_comments(tokens);
     let mut items = vec![];
     let mut tokens = &tokens[..];
     while let Some(item) = parse_item(&mut tokens) {
@@ -856,6 +885,32 @@ fn test_match() {
                         ),
                     ),
                 ],
+            ),
+        ),
+    ]
+    "###)
+}
+
+
+#[test]
+fn test_comment() {
+    insta::assert_debug_snapshot!(parse("let fst = |x, /* 2 \"hithere\" */ y| x "), @r###"
+    [
+        ItemLet(
+            Nonrecursive,
+            "fst",
+            Lambda(
+                [
+                    Var(
+                        "x",
+                    ),
+                    Var(
+                        "y",
+                    ),
+                ],
+                Var(
+                    "x",
+                ),
             ),
         ),
     ]

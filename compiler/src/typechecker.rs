@@ -52,6 +52,7 @@ impl Typechecker {
                     }
                 }
                 (Variable(variable_state), _) => {
+                    println!("hi there {:?} <: {:?}", subtype, supertype);
                     variable_state.borrow_mut().upper_bounds.insert(supertype.clone());
                     for lower_bound in variable_state.borrow().lower_bounds.iter() {
                         self.constrain(lower_bound.clone(), supertype.clone())
@@ -84,8 +85,9 @@ impl Typechecker {
             Lambda(args, expr) => {
                 match args.first() {
                     Some(Pattern::Var(name)) => {
-                        let var_ctx = var_ctx.update(name.clone(), SimpleType::fresh_var());
-                        self.typecheck_expr(expr, &var_ctx)
+                        let param = SimpleType::fresh_var();
+                        let var_ctx = var_ctx.update(name.clone(), param.clone());
+                        Rc::new(SimpleType::Function(vec![param],self.typecheck_expr(expr, &var_ctx)))
                     }
                     _ =>
                     // TODO: This should be able to typecheck all the patterns
@@ -129,17 +131,19 @@ pub fn typecheck(ast: &Program) -> AstType {
     match ast.first() {
         Some(Item::ItemLet(Nonrecursive, _name, expr)) => {
             let simple_type = typechecker.typecheck_expr(&**expr, &ImMap::new());
+            println!("Simple type: {:?}", simple_type);
             SimpleType::coalesce(simple_type)
         }
         _ => unimplemented!(),
     }
 }
 
-mod Test {
+mod test {
     use crate::types::*;
     use crate::typechecker::*;
     use crate::parser::*;
 
+    #[allow(dead_code)]
     fn test(source: &str) -> AstType {
         let ast = parse(source);
         typecheck(&ast)
@@ -187,10 +191,35 @@ mod Test {
 
     #[test]
     fn test_function() {
-        // TODO: This is wrong
-        insta::assert_debug_snapshot!(test("let x = |y| 2"), @r###"
-        Primitive(
-            Int,
+        insta::assert_debug_snapshot!(test("let x = |y| |x| y(x)"), @r###"
+        Function(
+            [
+                Intersection(
+                    TypeVariable(
+                        "a0",
+                    ),
+                    Function(
+                        [
+                            TypeVariable(
+                                "a1",
+                            ),
+                        ],
+                        TypeVariable(
+                            "a2",
+                        ),
+                    ),
+                ),
+            ],
+            Function(
+                [
+                    TypeVariable(
+                        "a1",
+                    ),
+                ],
+                TypeVariable(
+                    "a2",
+                ),
+            ),
         )
         "###);
     }
