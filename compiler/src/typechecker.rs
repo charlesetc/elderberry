@@ -190,7 +190,7 @@ mod test {
     }
 
     #[test]
-    fn test_function() {
+    fn test_most_basic_apply() {
         insta::assert_debug_snapshot!(test("let x = |y| |x| y(x)"), @r###"
         Function(
             [
@@ -224,4 +224,50 @@ mod test {
         "###);
     }
 
+    #[test]
+    fn test_twice() {
+        insta::assert_debug_snapshot!(test("let x = |f| |x| f(f(x))"), @r###"
+        Function(
+            [
+                Intersection(
+                    Intersection(
+                        TypeVariable(
+                            "a0",
+                        ),
+                        Function(
+                            [
+                                TypeVariable(
+                                    "a1",
+                                ),
+                            ],
+                            TypeVariable(
+                                "a3",
+                            ),
+                        ),
+                    ),
+                    Function(
+                        [
+                            TypeVariable(
+                                "a3",
+                            ),
+                        ],
+                        TypeVariable(
+                            "a2",
+                        ),
+                    ),
+                ),
+            ],
+            Function(
+                [
+                    TypeVariable(
+                        "a1",
+                    ),
+                ],
+                TypeVariable(
+                    "a2",
+                ),
+            ),
+        )
+        "###);
+    }
 }
