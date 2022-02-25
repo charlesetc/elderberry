@@ -34,6 +34,14 @@ fn unescape_string(lexer: &mut Lexer<Token>) -> Option<String> {
     Some(unescape_chars(chars))
 }
 
+fn is_not_underscore(c: char) -> Option<char> {
+    if c == '_' {
+        None
+    } else {
+        Some(c)
+    }
+}
+
 #[derive(Logos, Debug, Clone, PartialEq)]
 enum Token {
     #[token("module")]
@@ -96,10 +104,10 @@ enum Token {
     #[regex(r#""(?:[^"]|\\")*""#, unescape_string)]
     String(String),
 
-    #[regex("(\\+|-)?[0-9]+", |lex| lex.slice().parse())]
+    #[regex("(_\\+|-)?[_0-9]+", |lex| lex.slice().chars().filter_map(is_not_underscore).collect::<String>().parse())]
     Int(i64),
 
-    #[regex("[0-9]+\\.[0-9]+", |lex| lex.slice().parse())]
+    #[regex("[_0-9]+\\.[_0-9]+", |lex| lex.slice().chars().filter_map(is_not_underscore).collect::<String>().parse())]
     Float(f64),
 
     #[regex("[a-z][a-zA-Z]*", |lex| lex.slice().parse())]
@@ -615,19 +623,21 @@ fn remove_comments(tokens: Vec<TokenWithSpan>) -> Vec<TokenWithSpan> {
     let mut depth = 0;
     tokens
         .into_iter()
-        .filter_map(|token_with_span| {
-            match token_with_span {
-                (Token::OpenComment, _) => {
-                    depth += 1;
+        .filter_map(|token_with_span| match token_with_span {
+            (Token::OpenComment, _) => {
+                depth += 1;
+                None
+            }
+            (Token::CloseComment, _) => {
+                depth -= 1;
+                None
+            }
+            (token, span) => {
+                if depth > 0 {
                     None
+                } else {
+                    Some((token, span))
                 }
-                (Token::CloseComment, _) => {
-                    depth -= 1;
-                    None
-                }
-                (token, span) => if depth > 0 {
-                    None
-                } else { Some((token, span)) }
             }
         })
         .collect()
@@ -761,14 +771,26 @@ fn test_field_access() {
 
 #[test]
 fn test_numbers() {
-    insta::assert_debug_snapshot!(parse(r#"let s = 2"#), @r###"
+    insta::assert_debug_snapshot!(parse(r#"let s = { 2 1_000_000 }"#), @r###"
     [
         ItemLet(
             Nonrecursive,
             "s",
-            Constant(
-                Int(
-                    2,
+            Block(
+                Sequence(
+                    Constant(
+                        Int(
+                            2,
+                        ),
+                    ),
+                    Sequence(
+                        Constant(
+                            Int(
+                                1000000,
+                            ),
+                        ),
+                        Empty,
+                    ),
                 ),
             ),
         ),
@@ -890,7 +912,6 @@ fn test_match() {
     ]
     "###)
 }
-
 
 #[test]
 fn test_comment() {
