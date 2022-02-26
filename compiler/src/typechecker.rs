@@ -21,6 +21,9 @@ impl Typechecker {
         }
     }
 
+    // TODO: The constraint_cache used here should not be global and instead
+    // should be newly instantiated for each call to [constrain] that is outside
+    // of [constrain]: https://github.com/LPTK/simple-sub/discussions/46 
     fn constrain(&self, subtype: Rc<SimpleType>, supertype: Rc<SimpleType>) {
         use SimpleType::*;
         if self
@@ -270,4 +273,5 @@ mod test {
         )
         "###);
     }
+
 }
