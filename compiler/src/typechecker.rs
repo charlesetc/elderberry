@@ -10,183 +10,167 @@ fn type_error(str: String) -> ! {
     panic!("type error: {}", str)
 }
 
-struct Typechecker {
-    constraint_cache: RefCell<MutSet<(Rc<SimpleType>, Rc<SimpleType>)>>,
+fn constrain_(subtype: Rc<SimpleType>, supertype: Rc<SimpleType>, constraint_cache : Rc<RefCell<MutSet<(Rc<SimpleType>, Rc<SimpleType>)>>>) {
+    use SimpleType::*;
+    if constraint_cache.borrow_mut().insert((subtype.clone(), supertype.clone()))
+    {
+        match (&*subtype, &*supertype) {
+            (Primitive(n1), Primitive(n2)) if n1 == n2 => (), // all good
+            (Function(args1, ret1), Function(args2, ret2)) => {
+                if args1.len() != args2.len() {
+                    type_error(format!(
+                        "called function with {} arguments, but it only takes {}",
+                        args2.len(),
+                        args1.len()
+                    ));
+                }
+                for (arg1, arg2) in args1.iter().zip(args2.iter()) {
+                    constrain_(arg2.clone(), arg1.clone(), constraint_cache.clone());
+                }
+                constrain_(ret1.clone(), ret2.clone(), constraint_cache);
+            }
+            (Record(fields1), Record(fields2)) => {
+                for (field, value2) in fields2.iter() {
+                    match fields1.get(field) {
+                        Some(value1) => constrain_(value1.clone(), value2.clone(), constraint_cache.clone()),
+                        None => type_error(format!("missing field {}", field)),
+                    }
+                }
+            }
+            (Variable(variable_state), _) => {
+                println!("hi there {:?} <: {:?}", subtype, supertype);
+                variable_state
+                    .borrow_mut()
+                    .upper_bounds
+                    .insert(supertype.clone());
+                for lower_bound in variable_state.borrow().lower_bounds.iter() {
+                    constrain_(lower_bound.clone(), supertype.clone(), constraint_cache.clone())
+                }
+            }
+            (_, Variable(variable_state)) => {
+                variable_state
+                    .borrow_mut()
+                    .lower_bounds
+                    .insert(subtype.clone());
+                for upper_bound in variable_state.borrow().upper_bounds.iter() {
+                    constrain_(subtype.clone(), upper_bound.clone(), constraint_cache.clone())
+                }
+            }
+            _ => type_error(format!("cannot constrain {:?} <: {:?}", subtype, supertype)),
+        }
+    }
 }
 
-impl Typechecker {
-    fn new() -> Self {
-        Typechecker {
-            constraint_cache: RefCell::new(MutSet::new()),
-        }
-    }
+fn constrain(subtype: Rc<SimpleType>, supertype: Rc<SimpleType>) {
+    let constraint_cache = Rc::new(RefCell::new(MutSet::new()));
+    constrain_(subtype, supertype, constraint_cache)
+}
 
-    // TODO: The constraint_cache used here should not be global and instead
-    // should be newly instantiated for each call to [constrain] that is outside
-    // of [constrain]: https://github.com/LPTK/simple-sub/discussions/46
-    fn constrain(&self, subtype: Rc<SimpleType>, supertype: Rc<SimpleType>) {
-        use SimpleType::*;
-        if self
-            .constraint_cache
-            .borrow_mut()
-            .insert((subtype.clone(), supertype.clone()))
-        {
-            match (&*subtype, &*supertype) {
-                (Primitive(n1), Primitive(n2)) if n1 == n2 => (), // all good
-                (Function(args1, ret1), Function(args2, ret2)) => {
-                    if args1.len() != args2.len() {
-                        type_error(format!(
-                            "called function with {} arguments, but it only takes {}",
-                            args2.len(),
-                            args1.len()
-                        ));
-                    }
-                    for (arg1, arg2) in args1.iter().zip(args2.iter()) {
-                        self.constrain(arg2.clone(), arg1.clone());
-                    }
-                    self.constrain(ret1.clone(), ret2.clone());
-                }
-                (Record(fields1), Record(fields2)) => {
-                    for (field, value2) in fields2.iter() {
-                        match fields1.get(field) {
-                            Some(value1) => self.constrain(value1.clone(), value2.clone()),
-                            None => type_error(format!("missing field {}", field)),
-                        }
-                    }
-                }
-                (Variable(variable_state), _) => {
-                    println!("hi there {:?} <: {:?}", subtype, supertype);
-                    variable_state
-                        .borrow_mut()
-                        .upper_bounds
-                        .insert(supertype.clone());
-                    for lower_bound in variable_state.borrow().lower_bounds.iter() {
-                        self.constrain(lower_bound.clone(), supertype.clone())
-                    }
-                }
-                (_, Variable(variable_state)) => {
-                    variable_state
-                        .borrow_mut()
-                        .lower_bounds
-                        .insert(subtype.clone());
-                    for upper_bound in variable_state.borrow().upper_bounds.iter() {
-                        self.constrain(subtype.clone(), upper_bound.clone())
-                    }
-                }
-                _ => type_error(format!("cannot constrain {:?} <: {:?}", subtype, supertype)),
+fn typecheck_statements(
+    statements: &Statements,
+    var_ctx: &ImMap<String, Rc<SimpleType>>,
+) -> Rc<SimpleType> {
+    use Statements::*;
+    match statements {
+        Empty => Rc::new(SimpleType::Primitive(Primitive::Unit)),
+        Sequence(expr, rest) => {
+            let expr_type = typecheck_expr(expr, var_ctx);
+            match &**rest {
+                Empty => expr_type,
+                _ => typecheck_statements(rest, var_ctx)
             }
         }
+        Let(Nonrecursive, name, expr, rest) => {
+            let expr_type = typecheck_expr(expr, var_ctx);
+            let var_ctx = var_ctx.update(name.clone(), expr_type);
+            typecheck_statements(rest, &var_ctx)
+        }
+        Let(Recursive, _, _, _) => unimplemented!(),
     }
+}
 
-    fn typecheck_statements(
-        &self,
-        statements: &Statements,
-        var_ctx: &ImMap<String, Rc<SimpleType>>,
-    ) -> Rc<SimpleType> {
-        use Statements::*;
-        match statements {
-            Empty => Rc::new(SimpleType::Primitive(Primitive::Unit)),
-            Sequence(expr, rest) => {
-                let expr_type = self.typecheck_expr(expr, var_ctx);
-                match &**rest {
-                    Empty => expr_type,
-                    _ => self.typecheck_statements(rest, var_ctx)
+fn typecheck_expr(
+    expr: &Expr,
+    var_ctx: &ImMap<String, Rc<SimpleType>>,
+) -> Rc<SimpleType> {
+    use crate::ast::Constant::*;
+    use Expr::*;
+    match expr {
+        Constant(Bool(_)) => Rc::new(SimpleType::Primitive(Primitive::Bool)),
+        Constant(Int(_)) => Rc::new(SimpleType::Primitive(Primitive::Int)),
+        Constant(String(_)) => Rc::new(SimpleType::Primitive(Primitive::String)),
+        Constant(Float(_)) => Rc::new(SimpleType::Primitive(Primitive::Float)),
+        Constant(Unit) => Rc::new(SimpleType::Primitive(Primitive::Unit)),
+        Var(name) => match var_ctx.get(name) {
+            Some(simpletype) => simpletype.clone(),
+            None => type_error(format!("variable \"{}\" not found", name)),
+        },
+        Lambda(args, expr) => {
+            match args.first() {
+                Some(Pattern::Var(name)) => {
+                    let param = SimpleType::fresh_var();
+                    let var_ctx = var_ctx.update(name.clone(), param.clone());
+                    Rc::new(SimpleType::Function(
+                        vec![param],
+                        typecheck_expr(expr, &var_ctx),
+                    ))
+                }
+                _ =>
+                // TODO: This should be able to typecheck all the patterns
+                {
+                    unimplemented!()
                 }
             }
-            Let(Nonrecursive, name, expr, rest) => {
-                let expr_type = self.typecheck_expr(expr, var_ctx);
-                let var_ctx = var_ctx.update(name.clone(), expr_type);
-                self.typecheck_statements(rest, &var_ctx)
-            }
-            Let(Recursive, _, _, _) => unimplemented!(),
         }
-    }
-
-    fn typecheck_expr(
-        &self,
-        expr: &Expr,
-        var_ctx: &ImMap<String, Rc<SimpleType>>,
-    ) -> Rc<SimpleType> {
-        use crate::ast::Constant::*;
-        use Expr::*;
-        match expr {
-            Constant(Bool(_)) => Rc::new(SimpleType::Primitive(Primitive::Bool)),
-            Constant(Int(_)) => Rc::new(SimpleType::Primitive(Primitive::Int)),
-            Constant(String(_)) => Rc::new(SimpleType::Primitive(Primitive::String)),
-            Constant(Float(_)) => Rc::new(SimpleType::Primitive(Primitive::Float)),
-            Constant(Unit) => Rc::new(SimpleType::Primitive(Primitive::Unit)),
-            Var(name) => match var_ctx.get(name) {
-                Some(simpletype) => simpletype.clone(),
-                None => type_error(format!("variable \"{}\" not found", name)),
-            },
-            Lambda(args, expr) => {
-                match args.first() {
-                    Some(Pattern::Var(name)) => {
-                        let param = SimpleType::fresh_var();
-                        let var_ctx = var_ctx.update(name.clone(), param.clone());
-                        Rc::new(SimpleType::Function(
-                            vec![param],
-                            self.typecheck_expr(expr, &var_ctx),
-                        ))
-                    }
-                    _ =>
-                    // TODO: This should be able to typecheck all the patterns
-                    {
-                        unimplemented!()
-                    }
-                }
-            }
-            Apply(f, args) => {
-                let return_type = SimpleType::fresh_var();
-                let arg_types = args
-                    .iter()
-                    .map(|arg| self.typecheck_expr(arg, var_ctx))
-                    .collect::<Vec<_>>();
-                let f_type = Rc::new(SimpleType::Function(arg_types, return_type.clone()));
-                self.constrain(self.typecheck_expr(f, var_ctx), f_type);
-                return_type
-            }
-            Record(fields) => Rc::new(SimpleType::Record(
-                fields
-                    .iter()
-                    .map(|(name, expr)| (name.clone(), self.typecheck_expr(expr, &var_ctx)))
-                    .collect::<ImMap<_, _>>(),
-            )),
-            FieldAccess(expr, name) => {
-                let return_type = SimpleType::fresh_var();
-                self.constrain(
-                    self.typecheck_expr(expr, var_ctx),
-                    Rc::new(SimpleType::Record(
-                        im::hashmap! {name.clone() => return_type.clone()},
-                    )),
-                );
-                return_type
-            }
-            Block(statements) => self.typecheck_statements(statements, &var_ctx),
-            If(condition, true_branch, false_branch) => {
-                let condition_type = self.typecheck_expr(condition, &var_ctx);
-                self.constrain(condition_type, Rc::new(SimpleType::Primitive(Primitive::Bool)));
-                let return_type = SimpleType::fresh_var();
-                let true_type = self.typecheck_expr(true_branch, &var_ctx);
-                let false_type = match false_branch {
-                    Some(false_branch) => self.typecheck_expr(false_branch, &var_ctx),
-                    None => Rc::new(SimpleType::Primitive(Primitive::Unit)),
-                }; 
-                self.constrain(true_type, return_type.clone());
-                self.constrain(false_type, return_type.clone());
-                return_type
-            }
-            _ => unimplemented!(),
+        Apply(f, args) => {
+            let return_type = SimpleType::fresh_var();
+            let arg_types = args
+                .iter()
+                .map(|arg| typecheck_expr(arg, var_ctx))
+                .collect::<Vec<_>>();
+            let f_type = Rc::new(SimpleType::Function(arg_types, return_type.clone()));
+            constrain(typecheck_expr(f, var_ctx), f_type);
+            return_type
         }
+        Record(fields) => Rc::new(SimpleType::Record(
+            fields
+                .iter()
+                .map(|(name, expr)| (name.clone(), typecheck_expr(expr, &var_ctx)))
+                .collect::<ImMap<_, _>>(),
+        )),
+        FieldAccess(expr, name) => {
+            let return_type = SimpleType::fresh_var();
+            constrain(
+                typecheck_expr(expr, var_ctx),
+                Rc::new(SimpleType::Record(
+                    im::hashmap! {name.clone() => return_type.clone()},
+                )),
+            );
+            return_type
+        }
+        Block(statements) => typecheck_statements(statements, &var_ctx),
+        If(condition, true_branch, false_branch) => {
+            let condition_type = typecheck_expr(condition, &var_ctx);
+            constrain(condition_type, Rc::new(SimpleType::Primitive(Primitive::Bool)));
+            let return_type = SimpleType::fresh_var();
+            let true_type = typecheck_expr(true_branch, &var_ctx);
+            let false_type = match false_branch {
+                Some(false_branch) => typecheck_expr(false_branch, &var_ctx),
+                None => Rc::new(SimpleType::Primitive(Primitive::Unit)),
+            }; 
+            constrain(true_type, return_type.clone());
+            constrain(false_type, return_type.clone());
+            return_type
+        }
+        _ => unimplemented!(),
     }
 }
 
 pub fn typecheck(ast: &Program) -> AstType {
     assert_eq!(ast.len(), 1);
-    let typechecker = Typechecker::new();
     match ast.first() {
         Some(Item::ItemLet(Nonrecursive, _name, expr)) => {
-            let simple_type = typechecker.typecheck_expr(&**expr, &ImMap::new());
+            let simple_type = typecheck_expr(&**expr, &ImMap::new());
             println!("Simple type: {:?}", simple_type);
             SimpleType::coalesce(simple_type)
         }

@@ -800,7 +800,7 @@ fn test_field_access() {
 
 #[test]
 fn test_numbers() {
-    insta::assert_debug_snapshot!(parse(r#"let s = { 2 1_000_000; }"#), @r###"
+    insta::assert_debug_snapshot!(parse(r#"let s = { 2; 1_000_000; }"#), @r###"
     [
         ItemLet(
             Nonrecursive,
