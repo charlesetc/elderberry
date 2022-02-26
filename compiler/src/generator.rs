@@ -118,6 +118,7 @@ fn generate_expr(out: &mut String, expr: &Expr) {
         Expr::Constant(Constant::Int(i)) => out.push_str(&i.to_string()),
         Expr::Constant(Constant::Float(f)) => out.push_str(&f.to_string()),
         Expr::Constant(Constant::Bool(b)) => out.push_str(&b.to_string()),
+        Expr::Constant(Constant::Unit) => out.push_str("_eldb.unit"),
         Expr::Constant(Constant::String(s)) => {
             out.push_str("\"");
             out.push_str(&escape(s));

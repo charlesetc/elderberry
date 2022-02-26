@@ -308,6 +308,10 @@ fn parse_constant(tokens: &mut &[TokenWithSpan]) -> Option<Constant> {
             *tokens = rest;
             Some(Constant::Bool(false))
         }
+        [(Token::OpenParen, _), (Token::CloseParen, _), rest @ ..] => {
+            *tokens = rest;
+            Some(Constant::Unit)
+        }
         _ => None,
     }
 }

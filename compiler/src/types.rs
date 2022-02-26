@@ -11,6 +11,7 @@ pub enum Primitive {
     Float,
     String,
     Bool,
+    Unit,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]

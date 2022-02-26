@@ -6,6 +6,7 @@ pub enum Constant {
     Float(f64),
     String(String),
     Bool(bool),
+    Unit,
 }
 
 pub type VarName = String;

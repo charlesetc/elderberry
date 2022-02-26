@@ -1,8 +1,8 @@
 use crate::ast::*;
-use crate::types::{AstType, SimpleType, Primitive};
+use crate::types::{AstType, Primitive, SimpleType};
 use im::HashMap as ImMap;
-use std::collections::BTreeSet as MutSet;
 use std::cell::RefCell;
+use std::collections::BTreeSet as MutSet;
 use std::rc::Rc;
 use RecFlag::*;
 
@@ -23,7 +23,7 @@ impl Typechecker {
 
     // TODO: The constraint_cache used here should not be global and instead
     // should be newly instantiated for each call to [constrain] that is outside
-    // of [constrain]: https://github.com/LPTK/simple-sub/discussions/46 
+    // of [constrain]: https://github.com/LPTK/simple-sub/discussions/46
     fn constrain(&self, subtype: Rc<SimpleType>, supertype: Rc<SimpleType>) {
         use SimpleType::*;
         if self
@@ -50,30 +50,63 @@ impl Typechecker {
                     for (field, value2) in fields2.iter() {
                         match fields1.get(field) {
                             Some(value1) => self.constrain(value1.clone(), value2.clone()),
-                            None => type_error(format!("missing field {}", field))
+                            None => type_error(format!("missing field {}", field)),
                         }
                     }
                 }
                 (Variable(variable_state), _) => {
                     println!("hi there {:?} <: {:?}", subtype, supertype);
-                    variable_state.borrow_mut().upper_bounds.insert(supertype.clone());
+                    variable_state
+                        .borrow_mut()
+                        .upper_bounds
+                        .insert(supertype.clone());
                     for lower_bound in variable_state.borrow().lower_bounds.iter() {
                         self.constrain(lower_bound.clone(), supertype.clone())
                     }
                 }
                 (_, Variable(variable_state)) => {
-                    variable_state.borrow_mut().lower_bounds.insert(subtype.clone());
+                    variable_state
+                        .borrow_mut()
+                        .lower_bounds
+                        .insert(subtype.clone());
                     for upper_bound in variable_state.borrow().upper_bounds.iter() {
                         self.constrain(subtype.clone(), upper_bound.clone())
                     }
-
                 }
                 _ => type_error(format!("cannot constrain {:?} <: {:?}", subtype, supertype)),
             }
         }
     }
 
-    fn typecheck_expr(&self, expr: &Expr, var_ctx: &ImMap<String, Rc<SimpleType>>) -> Rc<SimpleType> {
+    fn typecheck_statements(
+        &self,
+        statements: &Statements,
+        var_ctx: &ImMap<String, Rc<SimpleType>>,
+    ) -> Rc<SimpleType> {
+        use Statements::*;
+        match statements {
+            Empty => Rc::new(SimpleType::Primitive(Primitive::Unit)),
+            Sequence(expr, rest) => {
+                let expr_type = self.typecheck_expr(expr, var_ctx);
+                match &**rest {
+                    Empty => expr_type,
+                    _ => self.typecheck_statements(rest, var_ctx)
+                }
+            }
+            Let(Nonrecursive, name, expr, rest) => {
+                let expr_type = self.typecheck_expr(expr, var_ctx);
+                let var_ctx = var_ctx.update(name.clone(), expr_type);
+                self.typecheck_statements(rest, &var_ctx)
+            }
+            Let(Recursive, _, _, _) => unimplemented!(),
+        }
+    }
+
+    fn typecheck_expr(
+        &self,
+        expr: &Expr,
+        var_ctx: &ImMap<String, Rc<SimpleType>>,
+    ) -> Rc<SimpleType> {
         use crate::ast::Constant::*;
         use Expr::*;
         match expr {
@@ -81,6 +114,7 @@ impl Typechecker {
             Constant(Int(_)) => Rc::new(SimpleType::Primitive(Primitive::Int)),
             Constant(String(_)) => Rc::new(SimpleType::Primitive(Primitive::String)),
             Constant(Float(_)) => Rc::new(SimpleType::Primitive(Primitive::Float)),
+            Constant(Unit) => Rc::new(SimpleType::Primitive(Primitive::Unit)),
             Var(name) => match var_ctx.get(name) {
                 Some(simpletype) => simpletype.clone(),
                 None => type_error(format!("variable \"{}\" not found", name)),
@@ -90,7 +124,10 @@ impl Typechecker {
                     Some(Pattern::Var(name)) => {
                         let param = SimpleType::fresh_var();
                         let var_ctx = var_ctx.update(name.clone(), param.clone());
-                        Rc::new(SimpleType::Function(vec![param],self.typecheck_expr(expr, &var_ctx)))
+                        Rc::new(SimpleType::Function(
+                            vec![param],
+                            self.typecheck_expr(expr, &var_ctx),
+                        ))
                     }
                     _ =>
                     // TODO: This should be able to typecheck all the patterns
@@ -119,10 +156,13 @@ impl Typechecker {
                 let return_type = SimpleType::fresh_var();
                 self.constrain(
                     self.typecheck_expr(expr, var_ctx),
-                    Rc::new(SimpleType::Record(im::hashmap!{name.clone() => return_type.clone()})),
+                    Rc::new(SimpleType::Record(
+                        im::hashmap! {name.clone() => return_type.clone()},
+                    )),
                 );
                 return_type
             }
+            Block(statements) => self.typecheck_statements(statements, &var_ctx),
             _ => unimplemented!(),
         }
     }
@@ -142,9 +182,9 @@ pub fn typecheck(ast: &Program) -> AstType {
 }
 
 mod test {
-    use crate::types::*;
-    use crate::typechecker::*;
     use crate::parser::*;
+    use crate::typechecker::*;
+    use crate::types::*;
 
     #[allow(dead_code)]
     fn test(source: &str) -> AstType {
@@ -273,5 +313,4 @@ mod test {
         )
         "###);
     }
-
 }
