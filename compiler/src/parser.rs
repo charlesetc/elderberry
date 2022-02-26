@@ -62,6 +62,12 @@ enum Token {
     #[token("false")]
     False,
 
+    #[token("if")]
+    If,
+
+    #[token("else")]
+    Else,
+
     #[token("(")]
     OpenParen,
 
@@ -91,6 +97,9 @@ enum Token {
 
     #[token(":")]
     Colon,
+
+    #[token(";")]
+    Semicolon,
 
     #[token("_")]
     Undescore,
@@ -396,6 +405,7 @@ fn parse_statements(tokens: &mut &[TokenWithSpan]) -> Statements {
             *tokens = rest;
             expect_and_consume(tokens, Token::Equals);
             let expr = parse_expression(tokens);
+            expect_and_consume(tokens, Token::Semicolon);
             let statements = parse_statements(tokens);
             Statements::Let(
                 Nonrecursive,
@@ -408,6 +418,7 @@ fn parse_statements(tokens: &mut &[TokenWithSpan]) -> Statements {
             *tokens = rest;
             expect_and_consume(tokens, Token::Equals);
             let expr = parse_expression(tokens);
+            expect_and_consume(tokens, Token::Semicolon);
             let statements = parse_statements(tokens);
             Statements::Let(
                 Recursive,
@@ -422,6 +433,7 @@ fn parse_statements(tokens: &mut &[TokenWithSpan]) -> Statements {
         }
         _ => {
             let expr = parse_expression(tokens);
+            expect_and_consume(tokens, Token::Semicolon);
             let statements = parse_statements(tokens);
             Statements::Sequence(Box::new(expr), Box::new(statements))
         }
@@ -471,6 +483,19 @@ fn parse_expression_without_operators(tokens: &mut &[TokenWithSpan]) -> Expr {
             expect_and_consume(tokens, Token::OpenBrace);
             let branches = parse_match_body(tokens);
             Expr::Match(Box::new(match_expr), branches)
+        }
+        [(Token::If, _), rest @ ..] => {
+            *tokens = rest;
+            let condition = parse_expression(tokens);
+            let true_branch = parse_expression(tokens);
+            let false_branch = match tokens {
+                [(Token::Else, _), rest @ ..] => {
+                    *tokens = rest;
+                    Some(Box::new(parse_expression(tokens)))
+                }
+                _ => None,
+            };
+            Expr::If(Box::new(condition), Box::new(true_branch), false_branch)
         }
         _ => {
             match parse_constant(tokens) {
@@ -775,7 +800,7 @@ fn test_field_access() {
 
 #[test]
 fn test_numbers() {
-    insta::assert_debug_snapshot!(parse(r#"let s = { 2 1_000_000 }"#), @r###"
+    insta::assert_debug_snapshot!(parse(r#"let s = { 2 1_000_000; }"#), @r###"
     [
         ItemLet(
             Nonrecursive,
@@ -1008,10 +1033,10 @@ fn test_block() {
     let parsed = parse(
         "
     let a = |x| {
-        let y = A
-        wow
-        let x = B
-        x(y) 
+        let y = A;
+        wow;
+        let x = B;
+        x(y);
     }
     ",
     );

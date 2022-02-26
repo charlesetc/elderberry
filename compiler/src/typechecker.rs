@@ -163,6 +163,19 @@ impl Typechecker {
                 return_type
             }
             Block(statements) => self.typecheck_statements(statements, &var_ctx),
+            If(condition, true_branch, false_branch) => {
+                let condition_type = self.typecheck_expr(condition, &var_ctx);
+                self.constrain(condition_type, Rc::new(SimpleType::Primitive(Primitive::Bool)));
+                let return_type = SimpleType::fresh_var();
+                let true_type = self.typecheck_expr(true_branch, &var_ctx);
+                let false_type = match false_branch {
+                    Some(false_branch) => self.typecheck_expr(false_branch, &var_ctx),
+                    None => Rc::new(SimpleType::Primitive(Primitive::Unit)),
+                }; 
+                self.constrain(true_type, return_type.clone());
+                self.constrain(false_type, return_type.clone());
+                return_type
+            }
             _ => unimplemented!(),
         }
     }
@@ -312,5 +325,60 @@ mod test {
             ),
         )
         "###);
+    }
+
+    #[test]
+    fn test_apply_to_object() {
+        insta::assert_debug_snapshot!(test("let x = {let a = {x: 2, y:3}; let b =  {x:2, y:\"hi\", z:true}; let f = |o| o.x; f(a); f(b); }"), @r###"
+        Union(
+            TypeVariable(
+                "a3",
+            ),
+            Primitive(
+                Int,
+            ),
+        )
+        "###);
+    }
+
+    #[test]
+    fn test_if_statement() {
+        insta::assert_debug_snapshot!(test("let x = if true 2 else \"hi\" "), @r###"
+        Union(
+            Union(
+                TypeVariable(
+                    "a0",
+                ),
+                Primitive(
+                    Int,
+                ),
+            ),
+            Primitive(
+                String,
+            ),
+        )
+        "###);
+        insta::assert_debug_snapshot!(test("let x = |x| if x x else x"), @r###"
+        Function(
+            [
+                Intersection(
+                    Intersection(
+                        TypeVariable(
+                            "a1",
+                        ),
+                        TypeVariable(
+                            "a2",
+                        ),
+                    ),
+                    Primitive(
+                        Bool,
+                    ),
+                ),
+            ],
+            TypeVariable(
+                "a2",
+            ),
+        )
+        "###)
     }
 }

@@ -36,6 +36,10 @@ fn generate_let(out: &mut String, name : &str, expr: &Expr) {
     out.push_str("; ");
 }
 
+fn generate_unit(out: &mut String) {
+    out.push_str("_eldb.unit")
+}
+
 fn generate_statements_(out: &mut String, statements: &Statements) {
     match statements {
         Statements::Empty => (),
@@ -47,7 +51,9 @@ fn generate_statements_(out: &mut String, statements: &Statements) {
             }) =>
         {
             generate_let(out, name, expr);
-            out.push_str("return _eldb.unit;")
+            out.push_str("return");
+            generate_unit(out);
+            out.push_str(";");
         }
         Statements::Let(Nonrecursive, name, expr, statements) => {
             generate_let(out, name, &expr);
@@ -191,6 +197,23 @@ fn generate_expr(out: &mut String, expr: &Expr) {
             }
             out.push_str("_eldb.unhandled_match()");
             out.push_str("})");
+        }
+        Expr::If(condition, true_branch, false_branch) => {
+            out.push_str("(() => {");
+            out.push_str("if (");
+            generate_expr(out, condition); // typechecked to result in a bool!
+            out.push_str(") {");
+            out.push_str("return");
+            generate_expr(out, true_branch);
+            out.push_str(";");
+            out.push_str("} else {");
+            out.push_str("return");
+            match false_branch {
+                Some(false_branch) => generate_expr(out, false_branch),
+                None => generate_unit(out),
+            }
+            out.push_str(";");
+            out.push_str("})()");
         }
         Expr::Match(matched_expr, branches) => {
             out.push_str("(() => {");

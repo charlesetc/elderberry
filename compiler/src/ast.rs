@@ -46,6 +46,7 @@ pub enum Expr {
     Apply(Box<Expr>, Vec<Expr>),
     Block(Statements),
     Var(VarName),
+    If(Box<Expr>, Box<Expr>, Option<Box<Expr>>),
 }
 
 #[derive(Debug, Clone)]
