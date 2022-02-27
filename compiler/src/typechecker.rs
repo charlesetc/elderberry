@@ -10,9 +10,15 @@ fn type_error(str: String) -> ! {
     panic!("type error: {}", str)
 }
 
-fn constrain_(subtype: Rc<SimpleType>, supertype: Rc<SimpleType>, constraint_cache : Rc<RefCell<MutSet<(Rc<SimpleType>, Rc<SimpleType>)>>>) {
+fn constrain_(
+    subtype: Rc<SimpleType>,
+    supertype: Rc<SimpleType>,
+    constraint_cache: Rc<RefCell<MutSet<(Rc<SimpleType>, Rc<SimpleType>)>>>,
+) {
     use SimpleType::*;
-    if constraint_cache.borrow_mut().insert((subtype.clone(), supertype.clone()))
+    if constraint_cache
+        .borrow_mut()
+        .insert((subtype.clone(), supertype.clone()))
     {
         match (&*subtype, &*supertype) {
             (Primitive(n1), Primitive(n2)) if n1 == n2 => (), // all good
@@ -32,7 +38,9 @@ fn constrain_(subtype: Rc<SimpleType>, supertype: Rc<SimpleType>, constraint_cac
             (Record(fields1), Record(fields2)) => {
                 for (field, value2) in fields2.iter() {
                     match fields1.get(field) {
-                        Some(value1) => constrain_(value1.clone(), value2.clone(), constraint_cache.clone()),
+                        Some(value1) => {
+                            constrain_(value1.clone(), value2.clone(), constraint_cache.clone())
+                        }
                         None => type_error(format!("missing field {}", field)),
                     }
                 }
@@ -44,7 +52,11 @@ fn constrain_(subtype: Rc<SimpleType>, supertype: Rc<SimpleType>, constraint_cac
                     .upper_bounds
                     .insert(supertype.clone());
                 for lower_bound in variable_state.borrow().lower_bounds.iter() {
-                    constrain_(lower_bound.clone(), supertype.clone(), constraint_cache.clone())
+                    constrain_(
+                        lower_bound.clone(),
+                        supertype.clone(),
+                        constraint_cache.clone(),
+                    )
                 }
             }
             (_, Variable(variable_state)) => {
@@ -53,7 +65,11 @@ fn constrain_(subtype: Rc<SimpleType>, supertype: Rc<SimpleType>, constraint_cac
                     .lower_bounds
                     .insert(subtype.clone());
                 for upper_bound in variable_state.borrow().upper_bounds.iter() {
-                    constrain_(subtype.clone(), upper_bound.clone(), constraint_cache.clone())
+                    constrain_(
+                        subtype.clone(),
+                        upper_bound.clone(),
+                        constraint_cache.clone(),
+                    )
                 }
             }
             _ => type_error(format!("cannot constrain {:?} <: {:?}", subtype, supertype)),
@@ -77,7 +93,7 @@ fn typecheck_statements(
             let expr_type = typecheck_expr(expr, var_ctx);
             match &**rest {
                 Empty => expr_type,
-                _ => typecheck_statements(rest, var_ctx)
+                _ => typecheck_statements(rest, var_ctx),
             }
         }
         Let(Nonrecursive, name, expr, rest) => {
@@ -89,10 +105,7 @@ fn typecheck_statements(
     }
 }
 
-fn typecheck_expr(
-    expr: &Expr,
-    var_ctx: &ImMap<String, Rc<SimpleType>>,
-) -> Rc<SimpleType> {
+fn typecheck_expr(expr: &Expr, var_ctx: &ImMap<String, Rc<SimpleType>>) -> Rc<SimpleType> {
     use crate::ast::Constant::*;
     use Expr::*;
     match expr {
@@ -151,13 +164,16 @@ fn typecheck_expr(
         Block(statements) => typecheck_statements(statements, &var_ctx),
         If(condition, true_branch, false_branch) => {
             let condition_type = typecheck_expr(condition, &var_ctx);
-            constrain(condition_type, Rc::new(SimpleType::Primitive(Primitive::Bool)));
+            constrain(
+                condition_type,
+                Rc::new(SimpleType::Primitive(Primitive::Bool)),
+            );
             let return_type = SimpleType::fresh_var();
             let true_type = typecheck_expr(true_branch, &var_ctx);
             let false_type = match false_branch {
                 Some(false_branch) => typecheck_expr(false_branch, &var_ctx),
                 None => Rc::new(SimpleType::Primitive(Primitive::Unit)),
-            }; 
+            };
             constrain(true_type, return_type.clone());
             constrain(false_type, return_type.clone());
             return_type
@@ -166,16 +182,23 @@ fn typecheck_expr(
     }
 }
 
-pub fn typecheck(ast: &Program) -> AstType {
-    assert_eq!(ast.len(), 1);
-    match ast.first() {
-        Some(Item::ItemLet(Nonrecursive, _name, expr)) => {
-            let simple_type = typecheck_expr(&**expr, &ImMap::new());
-            println!("Simple type: {:?}", simple_type);
-            SimpleType::coalesce(simple_type)
-        }
-        _ => unimplemented!(),
-    }
+pub fn typecheck(items: &Program) -> AstType {
+    let mut var_ctx = ImMap::new();
+    let last_type = items
+        .into_iter()
+        .map(|item| {
+            match item {
+                Item::ItemLet(Nonrecursive, name, expr) => {
+                    let simple_type = typecheck_expr(expr, &var_ctx);
+                    var_ctx.insert(name.clone(), simple_type.clone());
+                    simple_type
+                    // println!("Simple type: {:?}", simple_type);
+                }
+                _ => unimplemented!()
+            }
+        })
+        .last().unwrap();
+    SimpleType::coalesce(last_type)
 }
 
 mod test {
@@ -191,7 +214,7 @@ mod test {
 
     #[test]
     fn test_primitives() {
-        insta::assert_debug_snapshot!(test("let x = 2"), @r###"
+        insta::assert_debug_snapshot!(test("2"), @r###"
             Primitive(
                 Int,
             )
@@ -266,7 +289,7 @@ mod test {
 
     #[test]
     fn test_twice() {
-        insta::assert_debug_snapshot!(test("let x = |f| |x| f(f(x))"), @r###"
+        insta::assert_debug_snapshot!(test("|f| |x| f(f(x))"), @r###"
         Function(
             [
                 Intersection(

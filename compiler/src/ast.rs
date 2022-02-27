@@ -53,7 +53,7 @@ pub enum Expr {
 pub enum Item {
     Module(VarName, Vec<Item>),
     Alias(VarName, Vec<VarName>),
-    ItemLet(RecFlag, VarName, Box<Expr>),
+    ItemLet(RecFlag, VarName, Expr),
 }
 
 impl Item {

@@ -631,14 +631,14 @@ fn parse_item(tokens: &mut &[TokenWithSpan]) -> Option<Item> {
             Some(Item::ItemLet(
                 Nonrecursive,
                 name.to_string(),
-                Box::new(expr),
+                expr,
             ))
         }
         [(Token::Let, _), (Token::Rec, _), (Token::LowerVar(name), _), (Token::Equals, _), rest @ ..] =>
         {
             *tokens = rest;
             let expr = parse_expression(tokens);
-            Some(Item::ItemLet(Recursive, name.to_string(), Box::new(expr)))
+            Some(Item::ItemLet(Recursive, name.to_string(), expr))
         }
         _ => expected(
             "module alias, let statement, or module definition",
