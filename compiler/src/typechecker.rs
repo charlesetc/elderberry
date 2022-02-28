@@ -304,6 +304,42 @@ mod test {
             ],
         )
         "###);
+        insta::assert_debug_snapshot!(test("let f = |r| { r.hi; r.there; r; }"), @r###"
+        Function(
+            [
+                Intersection(
+                    Intersection(
+                        TypeVariable(
+                            "a0",
+                        ),
+                        Record(
+                            [
+                                (
+                                    "hi",
+                                    TypeVariable(
+                                        "a1",
+                                    ),
+                                ),
+                            ],
+                        ),
+                    ),
+                    Record(
+                        [
+                            (
+                                "there",
+                                TypeVariable(
+                                    "a2",
+                                ),
+                            ),
+                        ],
+                    ),
+                ),
+            ],
+            TypeVariable(
+                "a0",
+            ),
+        )
+        "###);
     }
 
     #[test]
