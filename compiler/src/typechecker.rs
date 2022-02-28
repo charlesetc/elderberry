@@ -122,8 +122,7 @@ fn typecheck_statements(
 fn typecheck_expr(expr: &Expr, var_ctx: &ImMap<String, Rc<dyn MaybeQuantified>>) -> Rc<SimpleType> {
     use crate::ast::Constant::*;
     use Expr::*;
-    let simple_type =
-    match expr {
+    let simple_type = match expr {
         Constant(Bool(_)) => Rc::new(SimpleType::Primitive(Primitive::Bool)),
         Constant(Int(_)) => Rc::new(SimpleType::Primitive(Primitive::Int)),
         Constant(String(_)) => Rc::new(SimpleType::Primitive(Primitive::String)),
@@ -208,15 +207,36 @@ fn freshen_type(
     use SimpleType::*;
     match *simple_type.clone() {
         Variable(ref state) => {
-            let mut qvar_context = qvar_context.borrow_mut();
             let existing_name = state.borrow().borrow().unique_name.clone();
-            let new_state = qvar_context
-                .entry(existing_name)
-                .or_insert_with(|| Rc::new(RefCell::new(RefCell::new(VariableState {
-                lower_bounds: state.borrow().borrow().lower_bounds.clone(),
-                upper_bounds: state.borrow().borrow().upper_bounds.clone(),
-                unique_name: unique_name(),
-            }))));
+            let new_state = {
+                let qvar_context = qvar_context.borrow();
+                qvar_context.get(&existing_name).map(|x| x.clone())
+            };
+            // Freshen the constraints as well - a bit wordy.
+            let new_state = match new_state {
+                None => {
+                    let new_state = Rc::new(RefCell::new(RefCell::new(VariableState {
+                        lower_bounds: state
+                            .borrow()
+                            .borrow()
+                            .lower_bounds
+                            .iter()
+                            .map(|simple_type| freshen_type(simple_type, qvar_context.clone()))
+                            .collect(),
+                        upper_bounds: state
+                            .borrow()
+                            .borrow()
+                            .upper_bounds
+                            .iter()
+                            .map(|simple_type| freshen_type(simple_type, qvar_context.clone()))
+                            .collect(),
+                        unique_name: unique_name(),
+                    })));
+                    qvar_context.borrow_mut().insert(existing_name, new_state.clone());
+                    new_state
+                }
+                Some(new_state) => new_state.clone(),
+            };
             Rc::new(Variable(new_state.clone()))
         }
         Primitive(_) => simple_type.clone(),
@@ -253,16 +273,14 @@ pub fn typecheck(items: &Program) -> AstType {
     let mut var_ctx = ImMap::new();
     let last_type = items
         .into_iter()
-        .map(|item| {
-            match item {
-                Item::ItemLet(Nonrecursive, name, expr) => {
-                    let simple_type = typecheck_expr(expr, &var_ctx);
-                    let ptype = PolymorphicType(simple_type.clone());
-                    var_ctx.insert(name.clone(), Rc::new(ptype));
-                    simple_type
-                }
-                _ => unimplemented!(),
+        .map(|item| match item {
+            Item::ItemLet(Nonrecursive, name, expr) => {
+                let simple_type = typecheck_expr(expr, &var_ctx);
+                let ptype = PolymorphicType(simple_type.clone());
+                var_ctx.insert(name.clone(), Rc::new(ptype));
+                simple_type
             }
+            _ => unimplemented!(),
         })
         .last()
         .unwrap();

@@ -23,6 +23,10 @@ pub struct VariableState {
     pub unique_name: VarName,
 }
 
+// We have two refcells here so we can "unify" vars by replacing one
+// This way future edits to the VariableState affect all occurrences of the variable.
+// A different way to do this would be to have these variable names be indexes into a
+// 'global' hashmap of "variable state". Either way, we needed another layer of indirection.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SimpleType {
     Variable(Rc<RefCell<RefCell<VariableState>>>),
