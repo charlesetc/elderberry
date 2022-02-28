@@ -47,7 +47,6 @@ fn constrain_(
                 }
             }
             (Variable(variable_state), _) => {
-                println!("hi there {:?} <: {:?}", subtype, supertype);
                 variable_state
                     .borrow_mut()
                     .upper_bounds
@@ -109,6 +108,7 @@ fn typecheck_statements(
 fn typecheck_expr(expr: &Expr, var_ctx: &ImMap<String, Rc<dyn MaybeQuantified>>) -> Rc<SimpleType> {
     use crate::ast::Constant::*;
     use Expr::*;
+    let simple_type =
     match expr {
         Constant(Bool(_)) => Rc::new(SimpleType::Primitive(Primitive::Bool)),
         Constant(Int(_)) => Rc::new(SimpleType::Primitive(Primitive::Int)),
@@ -179,29 +179,31 @@ fn typecheck_expr(expr: &Expr, var_ctx: &ImMap<String, Rc<dyn MaybeQuantified>>)
             constrain(false_type, return_type.clone());
             return_type
         }
-        _ => unimplemented!(),
-    }
+        Variant(_, _) => unimplemented!(),
+        Match(_, _) => unimplemented!(),
+    };
+    simple_type
 }
 
 pub struct PolymorphicType(Rc<SimpleType>);
 
 fn freshen_type(
     simple_type: &Rc<SimpleType>,
-    qvar_context: Rc<RefCell<MutMap<String, String>>>,
+    qvar_context: Rc<RefCell<MutMap<String, Rc<RefCell<VariableState>>>>>,
 ) -> Rc<SimpleType> {
     use SimpleType::*;
     match *simple_type.clone() {
         Variable(ref state) => {
             let mut qvar_context = qvar_context.borrow_mut();
-            let new_name = qvar_context
-                .entry(state.borrow().unique_name.clone())
-                .or_insert_with(|| unique_name());
-            let new_state = VariableState {
+            let existing_name = state.borrow().unique_name.clone();
+            let new_state = qvar_context
+                .entry(existing_name)
+                .or_insert_with(|| Rc::new(RefCell::new(VariableState {
                 lower_bounds: state.borrow().lower_bounds.clone(),
                 upper_bounds: state.borrow().upper_bounds.clone(),
-                unique_name: new_name.clone(),
-            };
-            Rc::new(Variable(Rc::new(RefCell::new(new_state))))
+                unique_name: unique_name(),
+            })));
+            Rc::new(Variable(new_state.clone()))
         }
         Primitive(_) => simple_type.clone(),
         Function(ref args, ref ret) => {
@@ -244,7 +246,6 @@ pub fn typecheck(items: &Program) -> AstType {
                     let ptype = PolymorphicType(simple_type.clone());
                     var_ctx.insert(name.clone(), Rc::new(ptype));
                     simple_type
-                    // println!("Simple type: {:?}", simple_type);
                 }
                 _ => unimplemented!(),
             }
@@ -471,8 +472,13 @@ mod test {
         "###);
         // This is wrong
         insta::assert_debug_snapshot!(test("let id = |x| x let x = { id(2); id(\"3\"); }"), @r###"
-        TypeVariable(
-            "a4",
+        Union(
+            TypeVariable(
+                "a10",
+            ),
+            Primitive(
+                String,
+            ),
         )
         "###);
     }

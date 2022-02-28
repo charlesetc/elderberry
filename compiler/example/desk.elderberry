@@ -1,4 +1,6 @@
-let x = |y| |x| y(x)
+let id = |x| x
+
+let x = id(2)
 
 /* let y = Yo
 
