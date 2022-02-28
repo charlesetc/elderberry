@@ -2,7 +2,6 @@ use im::HashMap as ImMap;
 use im::OrdSet as ImSet;
 use std::cell::RefCell;
 use std::collections::BTreeMap as MutMap;
-use std::collections::BTreeSet as MutSet;
 use std::rc::Rc;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -14,15 +13,15 @@ pub enum Primitive {
     Unit,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct VariableState {
-    pub lower_bounds: MutSet<Rc<SimpleType>>,
-    pub upper_bounds: MutSet<Rc<SimpleType>>,
-    unique_name: String,
-}
-
 type VarName = String;
 type FieldName = String;
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct VariableState {
+    pub lower_bounds: ImSet<Rc<SimpleType>>,
+    pub upper_bounds: ImSet<Rc<SimpleType>>,
+    pub unique_name: VarName,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SimpleType {
@@ -45,22 +44,35 @@ pub enum AstType {
     Primitive(Primitive),
 }
 
+pub trait MaybeQuantified {
+    fn instantiate(self: Rc<Self>) -> Rc<SimpleType>;
+}
+
+impl MaybeQuantified for SimpleType {
+    fn instantiate(self: Rc<Self>) -> Rc<SimpleType> {
+        self
+    }
+}
+
 type PolarVariable = (VariableState, bool);
 
 thread_local!(static UNIQUE_NAME_COUNTER : RefCell<usize> = RefCell::new(0));
 
+pub fn unique_name() -> VarName {
+    UNIQUE_NAME_COUNTER.with(|unique_name_counter| {
+        let mut ret = String::from("a");
+        ret.push_str(&unique_name_counter.borrow().clone().to_string());
+        unique_name_counter.replace_with(|&mut i| i + 1usize);
+        ret
+    })
+}
+
 impl VariableState {
     fn new() -> Self {
-        let unique_name = UNIQUE_NAME_COUNTER.with(|unique_name_counter| {
-            let mut ret = String::from("a");
-            ret.push_str(&unique_name_counter.borrow().clone().to_string());
-            unique_name_counter.replace_with(|&mut i| i + 1usize);
-            ret
-        });
         VariableState {
-            lower_bounds: MutSet::new(),
-            upper_bounds: MutSet::new(),
-            unique_name: unique_name,
+            lower_bounds: ImSet::new(),
+            upper_bounds: ImSet::new(),
+            unique_name: unique_name(),
         }
     }
 }

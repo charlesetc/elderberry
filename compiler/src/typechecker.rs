@@ -1,8 +1,9 @@
 use crate::ast::*;
-use crate::types::{AstType, Primitive, SimpleType};
+use crate::types::{unique_name, AstType, MaybeQuantified, Primitive, SimpleType, VariableState};
 use im::HashMap as ImMap;
 use std::cell::RefCell;
 use std::collections::BTreeSet as MutSet;
+use std::collections::HashMap as MutMap;
 use std::rc::Rc;
 use RecFlag::*;
 
@@ -84,7 +85,7 @@ fn constrain(subtype: Rc<SimpleType>, supertype: Rc<SimpleType>) {
 
 fn typecheck_statements(
     statements: &Statements,
-    var_ctx: &ImMap<String, Rc<SimpleType>>,
+    var_ctx: &ImMap<String, Rc<dyn MaybeQuantified>>,
 ) -> Rc<SimpleType> {
     use Statements::*;
     match statements {
@@ -105,7 +106,7 @@ fn typecheck_statements(
     }
 }
 
-fn typecheck_expr(expr: &Expr, var_ctx: &ImMap<String, Rc<SimpleType>>) -> Rc<SimpleType> {
+fn typecheck_expr(expr: &Expr, var_ctx: &ImMap<String, Rc<dyn MaybeQuantified>>) -> Rc<SimpleType> {
     use crate::ast::Constant::*;
     use Expr::*;
     match expr {
@@ -115,7 +116,7 @@ fn typecheck_expr(expr: &Expr, var_ctx: &ImMap<String, Rc<SimpleType>>) -> Rc<Si
         Constant(Float(_)) => Rc::new(SimpleType::Primitive(Primitive::Float)),
         Constant(Unit) => Rc::new(SimpleType::Primitive(Primitive::Unit)),
         Var(name) => match var_ctx.get(name) {
-            Some(simpletype) => simpletype.clone(),
+            Some(maybe_quantified) => maybe_quantified.clone().instantiate(),
             None => type_error(format!("variable \"{}\" not found", name)),
         },
         Lambda(args, expr) => {
@@ -182,6 +183,56 @@ fn typecheck_expr(expr: &Expr, var_ctx: &ImMap<String, Rc<SimpleType>>) -> Rc<Si
     }
 }
 
+pub struct PolymorphicType(Rc<SimpleType>);
+
+fn freshen_type(
+    simple_type: &Rc<SimpleType>,
+    qvar_context: Rc<RefCell<MutMap<String, String>>>,
+) -> Rc<SimpleType> {
+    use SimpleType::*;
+    match *simple_type.clone() {
+        Variable(ref state) => {
+            let mut qvar_context = qvar_context.borrow_mut();
+            let new_name = qvar_context
+                .entry(state.borrow().unique_name.clone())
+                .or_insert_with(|| unique_name());
+            let new_state = VariableState {
+                lower_bounds: state.borrow().lower_bounds.clone(),
+                upper_bounds: state.borrow().upper_bounds.clone(),
+                unique_name: new_name.clone(),
+            };
+            Rc::new(Variable(Rc::new(RefCell::new(new_state))))
+        }
+        Primitive(_) => simple_type.clone(),
+        Function(ref args, ref ret) => {
+            let args = args
+                .iter()
+                .map(|arg| freshen_type(arg, qvar_context.clone()))
+                .collect();
+            Rc::new(Function(args, freshen_type(ret, qvar_context.clone())))
+        }
+        Record(ref fields) => {
+            let fields = fields
+                .iter()
+                .map(|(name, simple_type)| {
+                    (
+                        name.clone(),
+                        freshen_type(simple_type, qvar_context.clone()),
+                    )
+                })
+                .collect();
+            Rc::new(Record(fields))
+        }
+    }
+}
+
+impl MaybeQuantified for PolymorphicType {
+    fn instantiate(self: Rc<Self>) -> Rc<SimpleType> {
+        let qvar_context = MutMap::new();
+        freshen_type(&self.0, Rc::new(RefCell::new(qvar_context)))
+    }
+}
+
 pub fn typecheck(items: &Program) -> AstType {
     let mut var_ctx = ImMap::new();
     let last_type = items
@@ -190,14 +241,16 @@ pub fn typecheck(items: &Program) -> AstType {
             match item {
                 Item::ItemLet(Nonrecursive, name, expr) => {
                     let simple_type = typecheck_expr(expr, &var_ctx);
-                    var_ctx.insert(name.clone(), simple_type.clone());
+                    let ptype = PolymorphicType(simple_type.clone());
+                    var_ctx.insert(name.clone(), Rc::new(ptype));
                     simple_type
                     // println!("Simple type: {:?}", simple_type);
                 }
-                _ => unimplemented!()
+                _ => unimplemented!(),
             }
         })
-        .last().unwrap();
+        .last()
+        .unwrap();
     SimpleType::coalesce(last_type)
 }
 
@@ -214,7 +267,7 @@ mod test {
 
     #[test]
     fn test_primitives() {
-        insta::assert_debug_snapshot!(test("2"), @r###"
+        insta::assert_debug_snapshot!(test("let x = 2"), @r###"
             Primitive(
                 Int,
             )
@@ -289,7 +342,7 @@ mod test {
 
     #[test]
     fn test_twice() {
-        insta::assert_debug_snapshot!(test("|f| |x| f(f(x))"), @r###"
+        insta::assert_debug_snapshot!(test("let x = |f| |x| f(f(x))"), @r###"
         Function(
             [
                 Intersection(
@@ -387,5 +440,40 @@ mod test {
             ),
         )
         "###)
+    }
+
+    #[test]
+    fn test_polymorphism() {
+        insta::assert_debug_snapshot!(test("let id = |y| y"), @r###"
+        Function(
+            [
+                TypeVariable(
+                    "a0",
+                ),
+            ],
+            TypeVariable(
+                "a0",
+            ),
+        )
+        "###);
+        // This is wrong
+        insta::assert_debug_snapshot!(test("let id = |x| x let x = { id(2); id(\"3\"); id; }"), @r###"
+        Function(
+            [
+                TypeVariable(
+                    "a6",
+                ),
+            ],
+            TypeVariable(
+                "a6",
+            ),
+        )
+        "###);
+        // This is wrong
+        insta::assert_debug_snapshot!(test("let id = |x| x let x = { id(2); id(\"3\"); }"), @r###"
+        TypeVariable(
+            "a4",
+        )
+        "###);
     }
 }
