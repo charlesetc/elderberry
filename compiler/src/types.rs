@@ -25,7 +25,7 @@ pub struct VariableState {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SimpleType {
-    Variable(Rc<RefCell<VariableState>>),
+    Variable(Rc<RefCell<RefCell<VariableState>>>),
     Primitive(Primitive),
     Function(Vec<Rc<SimpleType>>, Rc<SimpleType>),
     Record(ImMap<FieldName, Rc<SimpleType>>),
@@ -79,7 +79,7 @@ impl VariableState {
 
 impl SimpleType {
     pub fn fresh_var() -> Rc<Self> {
-        let state = RefCell::new(VariableState::new());
+        let state = RefCell::new(RefCell::new(VariableState::new()));
         Rc::new(SimpleType::Variable(Rc::new(state)))
     }
 
@@ -125,17 +125,18 @@ impl SimpleType {
                 AstType::Function(args, Rc::new(ret))
             }
             SimpleType::Variable(state) => {
-                let polar_var = (state.borrow().clone(), polar);
+                let polar_var = (state.borrow().borrow().clone(), polar);
                 if in_process.contains(&polar_var) {
                     let name = recursive_variables
                         .borrow_mut()
                         .entry(polar_var)
-                        .or_insert(state.borrow().unique_name.clone())
+                        .or_insert(state.borrow().borrow().unique_name.clone())
                         .clone();
                     AstType::TypeVariable(name)
                 } else {
                     if polar {
-                        let lower_bounds = &state.borrow().lower_bounds;
+                        let state_cell = &state.borrow();
+                        let lower_bounds = &state_cell.borrow().lower_bounds;
                         let lower_bound_types = lower_bounds
                             .iter()
                             .map(|lower_bound| {
@@ -150,7 +151,7 @@ impl SimpleType {
                             .collect::<Vec<_>>();
                         let ast_type = lower_bound_types
                             .iter()
-                            .fold(AstType::TypeVariable(state.borrow().unique_name.clone()), |acc, a| {
+                            .fold(AstType::TypeVariable(state.borrow().borrow().unique_name.clone()), |acc, a| {
                                 AstType::Union(Rc::new(acc), Rc::new(a.clone()))
                             });
                         match recursive_variables.borrow().get(&polar_var) {
@@ -158,7 +159,8 @@ impl SimpleType {
                             None => ast_type
                         }
                     } else {
-                        let upper_bounds = &state.borrow().upper_bounds;
+                        let state_cell = &state.borrow();
+                        let upper_bounds = &state_cell.borrow().upper_bounds;
                         let upper_bound_types = upper_bounds
                             .iter()
                             .map(|upper_bound| {
@@ -173,7 +175,7 @@ impl SimpleType {
                             .collect::<Vec<_>>();
                         let ast_type = upper_bound_types
                             .iter()
-                            .fold(AstType::TypeVariable(state.borrow().unique_name.clone()), |acc, a| {
+                            .fold(AstType::TypeVariable(state.borrow().borrow().unique_name.clone()), |acc, a| {
                                 AstType::Intersection(Rc::new(acc), Rc::new(a.clone()))
                             });
                         match recursive_variables.borrow().get(&polar_var) {

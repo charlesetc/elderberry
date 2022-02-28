@@ -46,12 +46,25 @@ fn constrain_(
                     }
                 }
             }
+            // (Variable(state1), Variable(state2)) => {
+            //     {
+            //         let state1_cell = state1.borrow_mut();
+            //         let state1_mut = state1_cell.borrow_mut();
+            //         let state2_cell = state1.borrow_mut();
+            //         let state2_mut = state1_cell.borrow_mut();
+            //         for lower_bound in (*state1_mut).lower_bounds.iter() {
+            //             for upper_bound in (*state2_mut).upper_bounds.iter() {}
+            //         }
+            //     }
+            //     unimplemented!()
+            // }
             (Variable(variable_state), _) => {
                 variable_state
                     .borrow_mut()
+                    .borrow_mut()
                     .upper_bounds
                     .insert(supertype.clone());
-                for lower_bound in variable_state.borrow().lower_bounds.iter() {
+                for lower_bound in variable_state.borrow().borrow().lower_bounds.iter() {
                     constrain_(
                         lower_bound.clone(),
                         supertype.clone(),
@@ -62,9 +75,10 @@ fn constrain_(
             (_, Variable(variable_state)) => {
                 variable_state
                     .borrow_mut()
+                    .borrow_mut()
                     .lower_bounds
                     .insert(subtype.clone());
-                for upper_bound in variable_state.borrow().upper_bounds.iter() {
+                for upper_bound in variable_state.borrow().borrow().upper_bounds.iter() {
                     constrain_(
                         subtype.clone(),
                         upper_bound.clone(),
@@ -189,20 +203,20 @@ pub struct PolymorphicType(Rc<SimpleType>);
 
 fn freshen_type(
     simple_type: &Rc<SimpleType>,
-    qvar_context: Rc<RefCell<MutMap<String, Rc<RefCell<VariableState>>>>>,
+    qvar_context: Rc<RefCell<MutMap<String, Rc<RefCell<RefCell<VariableState>>>>>>,
 ) -> Rc<SimpleType> {
     use SimpleType::*;
     match *simple_type.clone() {
         Variable(ref state) => {
             let mut qvar_context = qvar_context.borrow_mut();
-            let existing_name = state.borrow().unique_name.clone();
+            let existing_name = state.borrow().borrow().unique_name.clone();
             let new_state = qvar_context
                 .entry(existing_name)
-                .or_insert_with(|| Rc::new(RefCell::new(VariableState {
-                lower_bounds: state.borrow().lower_bounds.clone(),
-                upper_bounds: state.borrow().upper_bounds.clone(),
+                .or_insert_with(|| Rc::new(RefCell::new(RefCell::new(VariableState {
+                lower_bounds: state.borrow().borrow().lower_bounds.clone(),
+                upper_bounds: state.borrow().borrow().upper_bounds.clone(),
                 unique_name: unique_name(),
-            })));
+            }))));
             Rc::new(Variable(new_state.clone()))
         }
         Primitive(_) => simple_type.clone(),
