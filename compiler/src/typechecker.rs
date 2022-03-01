@@ -1,13 +1,13 @@
 use crate::ast::*;
 use crate::types::{
-    new_double_ref, unique_name, AstType, ConcreteType, DoubleRef, MaybeQuantified, Primitive,
-    SimpleType, VariableState,
+    new_double_ref, unique_name, AstType, ConcreteType, DoubleRef,
+    MaybeQuantified, Primitive, SimpleType, VariableState,
 };
 use im::HashMap as ImMap;
-use im::HashSet as ImSet;
+use im::OrdSet as ImSet;
 use std::cell::RefCell;
 use std::collections::BTreeSet as MutSet;
-use std::collections::HashMap as MutMap;
+use std::collections::BTreeMap as MutMap;
 use std::rc::Rc;
 use RecFlag::*;
 
@@ -24,12 +24,19 @@ trait Constraints {
 
 impl Constraints for VariableState {
     fn new_lower_bound(&mut self, lower_bound: Rc<ConcreteType>, cache: ConstraintCache) {
-        self.lower_bound = least_upper_bound_concrete(self.lower_bound.clone(), lower_bound.clone(), cache.clone());
+        self.lower_bound = least_upper_bound_concrete(
+            self.lower_bound.clone(),
+            lower_bound.clone(),
+            cache.clone(),
+        );
         constrain_concrete_types(lower_bound, self.upper_bound.clone(), cache);
     }
     fn new_upper_bound(&mut self, upper_bound: Rc<ConcreteType>, cache: ConstraintCache) {
-        self.upper_bound =
-            greatest_lower_bound_concrete(self.upper_bound.clone(), upper_bound.clone(), cache.clone());
+        self.upper_bound = greatest_lower_bound_concrete(
+            self.upper_bound.clone(),
+            upper_bound.clone(),
+            cache.clone(),
+        );
         constrain_concrete_types(self.lower_bound.clone(), upper_bound, cache);
     }
 }
@@ -229,10 +236,7 @@ fn constrain_concrete_types(
                 }
             }
         }
-        _ => type_error(format!(
-            "cannot constrain {:?} <: {:?}",
-            subtype, supertype
-        )),
+        _ => type_error(format!("cannot constrain {:?} <: {:?}", subtype, supertype)),
     }
 }
 
@@ -243,7 +247,9 @@ fn constrain_(subtype: Rc<SimpleType>, supertype: Rc<SimpleType>, cache: Constra
         .insert((subtype.clone(), supertype.clone()))
     {
         match (&*subtype, &*supertype) {
-            (Concrete(subtype_c), Concrete(supertype_c)) => constrain_concrete_types(subtype_c.clone(), supertype_c.clone(), cache),
+            (Concrete(subtype_c), Concrete(supertype_c)) => {
+                constrain_concrete_types(subtype_c.clone(), supertype_c.clone(), cache)
+            }
             (Variable(state1), Variable(state2)) => {
                 unify_and_replace(state1.clone(), state2.clone(), cache);
             }
@@ -452,6 +458,100 @@ impl MaybeQuantified for PolymorphicType {
     }
 }
 
+type PolarVariable = (VariableState, bool);
+
+fn coalesce_concrete_type(
+    concrete_type: Rc<ConcreteType>,
+    recursive_variables: Rc<RefCell<MutMap<PolarVariable, String>>>,
+    polar: bool,
+    in_process: ImSet<PolarVariable>,
+) -> AstType {
+    match &*concrete_type {
+        ConcreteType::Top => AstType::Top,
+        ConcreteType::Bottom => AstType::Bottom,
+        ConcreteType::Primitive(p) => AstType::Primitive(p.clone()),
+        ConcreteType::Function(args, ret) => {
+            let args = args
+                .iter()
+                .map(|arg| {
+                    coalesce_simple_type_(
+                        arg.clone(),
+                        recursive_variables.clone(),
+                        !polar,
+                        in_process.clone(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            let ret =
+                coalesce_simple_type_(ret.clone(), recursive_variables, polar, in_process);
+            AstType::Function(args, Rc::new(ret))
+        }
+        ConcreteType::Record(fields) => {
+            let fields = fields
+                .iter()
+                .map(|(name, field_type)| {
+                    (
+                        name.clone(),
+                        coalesce_simple_type_(
+                            field_type.clone(),
+                            recursive_variables.clone(),
+                            polar,
+                            in_process.clone(),
+                        ),
+                    )
+                })
+                .collect::<Vec<_>>();
+            AstType::Record(fields)
+        }
+    }
+}
+
+fn coalesce_simple_type_(
+    simple_type: Rc<SimpleType>,
+    recursive_variables: Rc<RefCell<MutMap<PolarVariable, String>>>,
+    polar: bool,
+    in_process: ImSet<PolarVariable>,
+) -> AstType {
+    use SimpleType::*;
+    match &*simple_type {
+        Concrete(c) => coalesce_concrete_type(c.clone(), recursive_variables, polar, in_process),
+        Variable(state) => {
+            let polar_var = (state.borrow().clone(), polar);
+            if in_process.contains(&polar_var) {
+                let name = recursive_variables
+                    .borrow_mut()
+                    .entry(polar_var)
+                    .or_insert(state.borrow().unique_name.clone())
+                    .clone();
+                AstType::TypeVariable(name)
+            } else {
+                let in_process = in_process.update(polar_var.clone());
+                let bounded_type = if polar {
+                    state.borrow().lower_bound.clone()
+                } else {
+                    state.borrow().upper_bound.clone()
+                };
+                let ast_type = coalesce_concrete_type(
+                    bounded_type,
+                    recursive_variables.clone(),
+                    polar,
+                    in_process,
+                );
+                match recursive_variables.borrow().get(&polar_var) {
+                    Some(name) => AstType::Recursive(name.clone(), Rc::new(ast_type)),
+                    None => ast_type,
+                }
+            }
+        }
+    }
+}
+
+fn coalesce_simple_type(simple_type: Rc<SimpleType>) -> AstType {
+    let recursive_variables = Rc::new(RefCell::new(MutMap::new()));
+    coalesce_simple_type_(simple_type, recursive_variables, true, ImSet::new())
+}
+
+
 pub fn typecheck(items: &Program) -> AstType {
     let mut var_ctx = ImMap::new();
     let last_type = items
@@ -467,7 +567,7 @@ pub fn typecheck(items: &Program) -> AstType {
         })
         .last()
         .unwrap();
-    SimpleType::coalesce(last_type)
+    coalesce_simple_type(last_type)
 }
 
 mod test {
