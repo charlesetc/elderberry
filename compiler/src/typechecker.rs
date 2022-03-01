@@ -1,13 +1,13 @@
 use crate::ast::*;
 use crate::types::{
-    new_double_ref, unique_name, AstType, ConcreteType, DoubleRef,
-    MaybeQuantified, Primitive, SimpleType, VariableState,
+    new_double_ref, unique_name, AstType, ConcreteType, DoubleRef, MaybeQuantified, Primitive,
+    SimpleType, VariableState,
 };
 use im::HashMap as ImMap;
 use im::OrdSet as ImSet;
 use std::cell::RefCell;
-use std::collections::BTreeSet as MutSet;
 use std::collections::BTreeMap as MutMap;
+use std::collections::BTreeSet as MutSet;
 use std::rc::Rc;
 use RecFlag::*;
 
@@ -463,7 +463,7 @@ type PolarVariable = (VariableState, bool);
 fn coalesce_concrete_type(
     concrete_type: Rc<ConcreteType>,
     recursive_variables: Rc<RefCell<MutMap<PolarVariable, String>>>,
-    polar: bool,
+    polarity: bool,
     in_process: ImSet<PolarVariable>,
 ) -> AstType {
     match &*concrete_type {
@@ -477,13 +477,12 @@ fn coalesce_concrete_type(
                     coalesce_simple_type_(
                         arg.clone(),
                         recursive_variables.clone(),
-                        !polar,
+                        !polarity,
                         in_process.clone(),
                     )
                 })
                 .collect::<Vec<_>>();
-            let ret =
-                coalesce_simple_type_(ret.clone(), recursive_variables, polar, in_process);
+            let ret = coalesce_simple_type_(ret.clone(), recursive_variables, polarity, in_process);
             AstType::Function(args, Rc::new(ret))
         }
         ConcreteType::Record(fields) => {
@@ -495,7 +494,7 @@ fn coalesce_concrete_type(
                         coalesce_simple_type_(
                             field_type.clone(),
                             recursive_variables.clone(),
-                            polar,
+                            polarity,
                             in_process.clone(),
                         ),
                     )
@@ -509,24 +508,25 @@ fn coalesce_concrete_type(
 fn coalesce_simple_type_(
     simple_type: Rc<SimpleType>,
     recursive_variables: Rc<RefCell<MutMap<PolarVariable, String>>>,
-    polar: bool,
+    polarity: bool,
     in_process: ImSet<PolarVariable>,
 ) -> AstType {
     use SimpleType::*;
     match &*simple_type {
-        Concrete(c) => coalesce_concrete_type(c.clone(), recursive_variables, polar, in_process),
+        Concrete(c) => coalesce_concrete_type(c.clone(), recursive_variables, polarity, in_process),
         Variable(state) => {
-            let polar_var = (state.borrow().clone(), polar);
+            let polar_var = (state.borrow().clone(), polarity);
             if in_process.contains(&polar_var) {
+                // TODO: I think this should be a new state?
                 let name = recursive_variables
                     .borrow_mut()
                     .entry(polar_var)
-                    .or_insert(state.borrow().unique_name.clone())
+                    .or_insert_with(|| unique_name())
                     .clone();
                 AstType::TypeVariable(name)
             } else {
                 let in_process = in_process.update(polar_var.clone());
-                let bounded_type = if polar {
+                let bounded_type = if polarity {
                     state.borrow().lower_bound.clone()
                 } else {
                     state.borrow().upper_bound.clone()
@@ -534,9 +534,20 @@ fn coalesce_simple_type_(
                 let ast_type = coalesce_concrete_type(
                     bounded_type,
                     recursive_variables.clone(),
-                    polar,
+                    polarity,
                     in_process,
                 );
+                let this_var = AstType::TypeVariable(state.borrow().unique_name.clone());
+                let ast_type =
+                    if polarity && ast_type == AstType::Top || ast_type == AstType::Bottom {
+                        this_var
+                    } else {
+                        if polarity {
+                            AstType::Union(Rc::new(this_var), Rc::new(ast_type))
+                        } else {
+                            AstType::Union(Rc::new(this_var), Rc::new(ast_type))
+                        }
+                    };
                 match recursive_variables.borrow().get(&polar_var) {
                     Some(name) => AstType::Recursive(name.clone(), Rc::new(ast_type)),
                     None => ast_type,
@@ -550,7 +561,6 @@ fn coalesce_simple_type(simple_type: Rc<SimpleType>) -> AstType {
     let recursive_variables = Rc::new(RefCell::new(MutMap::new()));
     coalesce_simple_type_(simple_type, recursive_variables, true, ImSet::new())
 }
-
 
 pub fn typecheck(items: &Program) -> AstType {
     let mut var_ctx = ImMap::new();
@@ -567,7 +577,7 @@ pub fn typecheck(items: &Program) -> AstType {
         })
         .last()
         .unwrap();
-    coalesce_simple_type(last_type)
+    coalesce_simple_type(last_type).simplify()
 }
 
 mod test {
