@@ -18,6 +18,8 @@ type FieldName = String;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ConcreteType {
+    Top,
+    Bottom,
     Primitive(Primitive),
     Function(Vec<Rc<SimpleType>>, Rc<SimpleType>),
     Record(ImMap<FieldName, Rc<SimpleType>>),
@@ -25,9 +27,16 @@ pub enum ConcreteType {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct VariableState {
-    pub lower_bounds: ImSet<Rc<SimpleType>>,
-    pub upper_bounds: ImSet<Rc<SimpleType>>,
+    pub lower_bound: Rc<ConcreteType>,
+    pub upper_bound: Rc<ConcreteType>,
     pub unique_name: VarName,
+}
+
+pub type DoubleRef<T> = Rc<RefCell<Rc<RefCell<T>>>>;
+
+
+pub fn new_double_ref<T>(t: T) -> DoubleRef<T> {
+    Rc::new(RefCell::new(Rc::new(RefCell::new(t))))
 }
 
 // We have two refcells here so we can "unify" vars by replacing one
@@ -36,8 +45,8 @@ pub struct VariableState {
 // 'global' hashmap of "variable state". Either way, we needed another layer of indirection.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SimpleType {
-    Variable(Rc<RefCell<RefCell<VariableState>>>),
-    Concrete(ConcreteType),
+    Variable(DoubleRef<VariableState>),
+    Concrete(Rc<ConcreteType>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -79,8 +88,8 @@ pub fn unique_name() -> VarName {
 impl VariableState {
     fn new() -> Self {
         VariableState {
-            lower_bounds: ImSet::new(),
-            upper_bounds: ImSet::new(),
+            lower_bound: Rc::new(ConcreteType::Bottom),
+            upper_bound: Rc::new(ConcreteType::Top),
             unique_name: unique_name(),
         }
     }
@@ -88,8 +97,8 @@ impl VariableState {
 
 impl SimpleType {
     pub fn fresh_var() -> Rc<Self> {
-        let state = RefCell::new(RefCell::new(VariableState::new()));
-        Rc::new(SimpleType::Variable(Rc::new(state)))
+        let state = new_double_ref(VariableState::new());
+        Rc::new(SimpleType::Variable(state))
     }
 
     fn coalesce_(
@@ -98,103 +107,104 @@ impl SimpleType {
         polar: bool,
         in_process: ImSet<PolarVariable>,
     ) -> AstType {
-        match &*simple_type {
-            SimpleType::Concrete(ConcreteType::Primitive(p)) => AstType::Primitive(p.clone()),
-            SimpleType::Concrete(ConcreteType::Record(fields)) => {
-                let fields = fields
-                    .iter()
-                    .map(|(name, field_type)| {
-                        (
-                            name.clone(),
-                            SimpleType::coalesce_(
-                                field_type.clone(),
-                                recursive_variables.clone(),
-                                polar,
-                                in_process.clone(),
-                            ),
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                AstType::Record(fields)
-            }
-            SimpleType::Concrete(ConcreteType::Function(args, ret)) => {
-                let args = args
-                    .iter()
-                    .map(|arg| {
-                        SimpleType::coalesce_(
-                            arg.clone(),
-                            recursive_variables.clone(),
-                            !polar,
-                            in_process.clone(),
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                let ret =
-                    SimpleType::coalesce_(ret.clone(), recursive_variables, polar, in_process);
-                AstType::Function(args, Rc::new(ret))
-            }
-            SimpleType::Variable(state) => {
-                let polar_var = (state.borrow().borrow().clone(), polar);
-                if in_process.contains(&polar_var) {
-                    let name = recursive_variables
-                        .borrow_mut()
-                        .entry(polar_var)
-                        .or_insert(state.borrow().borrow().unique_name.clone())
-                        .clone();
-                    AstType::TypeVariable(name)
-                } else {
-                    if polar {
-                        let state_cell = &state.borrow();
-                        let lower_bounds = &state_cell.borrow().lower_bounds;
-                        let lower_bound_types = lower_bounds
-                            .iter()
-                            .map(|lower_bound| {
-                                let in_process = in_process.update(polar_var.clone());
-                                SimpleType::coalesce_(
-                                    lower_bound.clone(),
-                                    recursive_variables.clone(),
-                                    polar,
-                                    in_process,
-                                )
-                            })
-                            .collect::<Vec<_>>();
-                        let ast_type = lower_bound_types
-                            .iter()
-                            .fold(AstType::TypeVariable(state.borrow().borrow().unique_name.clone()), |acc, a| {
-                                AstType::Union(Rc::new(acc), Rc::new(a.clone()))
-                            });
-                        match recursive_variables.borrow().get(&polar_var) {
-                            Some(name) => AstType::Recursive(name.clone(), Rc::new(ast_type)),
-                            None => ast_type
-                        }
-                    } else {
-                        let state_cell = &state.borrow();
-                        let upper_bounds = &state_cell.borrow().upper_bounds;
-                        let upper_bound_types = upper_bounds
-                            .iter()
-                            .map(|upper_bound| {
-                                let in_process = in_process.update(polar_var.clone());
-                                SimpleType::coalesce_(
-                                    upper_bound.clone(),
-                                    recursive_variables.clone(),
-                                    polar,
-                                    in_process,
-                                )
-                            })
-                            .collect::<Vec<_>>();
-                        let ast_type = upper_bound_types
-                            .iter()
-                            .fold(AstType::TypeVariable(state.borrow().borrow().unique_name.clone()), |acc, a| {
-                                AstType::Intersection(Rc::new(acc), Rc::new(a.clone()))
-                            });
-                        match recursive_variables.borrow().get(&polar_var) {
-                            Some(name) => AstType::Recursive(name.clone(), Rc::new(ast_type)),
-                            None => ast_type
-                        }
-                    }
-                }
-            }
-        }
+        unimplemented!()
+        // match &*simple_type {
+        //     SimpleType::Concrete(ConcreteType::Primitive(p)) => AstType::Primitive(p.clone()),
+        //     SimpleType::Concrete(ConcreteType::Record(fields)) => {
+        //         let fields = fields
+        //             .iter()
+        //             .map(|(name, field_type)| {
+        //                 (
+        //                     name.clone(),
+        //                     SimpleType::coalesce_(
+        //                         field_type.clone(),
+        //                         recursive_variables.clone(),
+        //                         polar,
+        //                         in_process.clone(),
+        //                     ),
+        //                 )
+        //             })
+        //             .collect::<Vec<_>>();
+        //         AstType::Record(fields)
+        //     }
+        //     SimpleType::Concrete(ConcreteType::Function(args, ret)) => {
+        //         let args = args
+        //             .iter()
+        //             .map(|arg| {
+        //                 SimpleType::coalesce_(
+        //                     arg.clone(),
+        //                     recursive_variables.clone(),
+        //                     !polar,
+        //                     in_process.clone(),
+        //                 )
+        //             })
+        //             .collect::<Vec<_>>();
+        //         let ret =
+        //             SimpleType::coalesce_(ret.clone(), recursive_variables, polar, in_process);
+        //         AstType::Function(args, Rc::new(ret))
+        //     }
+        //     SimpleType::Variable(state) => {
+        //         let polar_var = (state.borrow().borrow().clone(), polar);
+        //         if in_process.contains(&polar_var) {
+        //             let name = recursive_variables
+        //                 .borrow_mut()
+        //                 .entry(polar_var)
+        //                 .or_insert(state.borrow().borrow().unique_name.clone())
+        //                 .clone();
+        //             AstType::TypeVariable(name)
+        //         } else {
+        //             if polar {
+        //                 let state_cell = &state.borrow();
+        //                 let lower_bounds = &state_cell.borrow().lower_bounds;
+        //                 let lower_bound_types = lower_bounds
+        //                     .iter()
+        //                     .map(|lower_bound| {
+        //                         let in_process = in_process.update(polar_var.clone());
+        //                         SimpleType::coalesce_(
+        //                             lower_bound.clone(),
+        //                             recursive_variables.clone(),
+        //                             polar,
+        //                             in_process,
+        //                         )
+        //                     })
+        //                     .collect::<Vec<_>>();
+        //                 let ast_type = lower_bound_types
+        //                     .iter()
+        //                     .fold(AstType::TypeVariable(state.borrow().borrow().unique_name.clone()), |acc, a| {
+        //                         AstType::Union(Rc::new(acc), Rc::new(a.clone()))
+        //                     });
+        //                 match recursive_variables.borrow().get(&polar_var) {
+        //                     Some(name) => AstType::Recursive(name.clone(), Rc::new(ast_type)),
+        //                     None => ast_type
+        //                 }
+        //             } else {
+        //                 let state_cell = &state.borrow();
+        //                 let upper_bounds = &state_cell.borrow().upper_bounds;
+        //                 let upper_bound_types = upper_bounds
+        //                     .iter()
+        //                     .map(|upper_bound| {
+        //                         let in_process = in_process.update(polar_var.clone());
+        //                         SimpleType::coalesce_(
+        //                             upper_bound.clone(),
+        //                             recursive_variables.clone(),
+        //                             polar,
+        //                             in_process,
+        //                         )
+        //                     })
+        //                     .collect::<Vec<_>>();
+        //                 let ast_type = upper_bound_types
+        //                     .iter()
+        //                     .fold(AstType::TypeVariable(state.borrow().borrow().unique_name.clone()), |acc, a| {
+        //                         AstType::Intersection(Rc::new(acc), Rc::new(a.clone()))
+        //                     });
+        //                 match recursive_variables.borrow().get(&polar_var) {
+        //                     Some(name) => AstType::Recursive(name.clone(), Rc::new(ast_type)),
+        //                     None => ast_type
+        //                 }
+        //             }
+        //         }
+        //     }
+        // }
     }
 
     pub fn coalesce(simple_type: Rc<Self>) -> AstType {

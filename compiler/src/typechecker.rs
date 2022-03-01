@@ -1,6 +1,10 @@
 use crate::ast::*;
-use crate::types::{unique_name, AstType, MaybeQuantified, Primitive, SimpleType, VariableState, ConcreteType};
+use crate::types::{
+    unique_name, new_double_ref, AstType, ConcreteType, DoubleRef, MaybeQuantified, Primitive, SimpleType,
+    VariableState,
+};
 use im::HashMap as ImMap;
+use im::HashSet as ImSet;
 use std::cell::RefCell;
 use std::collections::BTreeSet as MutSet;
 use std::collections::HashMap as MutMap;
@@ -11,81 +15,253 @@ fn type_error(str: String) -> ! {
     panic!("type error: {}", str)
 }
 
-fn constrain_(
-    subtype: Rc<SimpleType>,
-    supertype: Rc<SimpleType>,
-    constraint_cache: Rc<RefCell<MutSet<(Rc<SimpleType>, Rc<SimpleType>)>>>,
-) {
-    use SimpleType::*;
+type ConstraintCache = Rc<RefCell<MutSet<(Rc<SimpleType>, Rc<SimpleType>)>>>;
+
+trait Constraints {
+    fn new_lower_bound(&mut self, lower_bound: Rc<ConcreteType>, cache: ConstraintCache);
+    fn new_upper_bound(&mut self, upper_bound: Rc<ConcreteType>, cache: ConstraintCache);
+}
+
+impl Constraints for VariableState {
+    fn new_lower_bound(&mut self, lower_bound: Rc<ConcreteType>, cache: ConstraintCache) {
+        self.lower_bound = least_upper_bound_concrete(self.lower_bound.clone(), lower_bound, cache);
+    }
+    fn new_upper_bound(&mut self, upper_bound: Rc<ConcreteType>, cache: ConstraintCache) {
+        self.upper_bound =
+            greatest_lower_bound_concrete(self.upper_bound.clone(), upper_bound, cache);
+    }
+}
+
+fn unify_and_replace(
+    a: DoubleRef<VariableState>,
+    b: DoubleRef<VariableState>,
+    cache: ConstraintCache,
+) -> DoubleRef<VariableState> {
+    {
+        a.borrow_mut()
+            .borrow_mut()
+            .new_lower_bound(b.borrow().borrow().lower_bound.clone(), cache.clone());
+        a.borrow_mut()
+            .borrow_mut()
+            .new_upper_bound(b.borrow().borrow().upper_bound.clone(), cache);
+    };
+    b.replace(a.borrow().clone());
+    a
+}
+
+fn greatest_lower_bound_concrete(
+    a: Rc<ConcreteType>,
+    b: Rc<ConcreteType>,
+    cache: ConstraintCache,
+) -> Rc<ConcreteType> {
     use ConcreteType::*;
-    if constraint_cache
+    match (&*a, &*b) {
+        (Top, _) => b,
+        (_, Top) => a,
+        (Bottom, _) | (_, Bottom) => Rc::new(Bottom),
+        (Function(args1, ret1), Function(args2, ret2)) => {
+            assert_eq!(args1.len(), args2.len());
+            Rc::new(Function(
+                args1
+                    .iter()
+                    .zip(args2.iter())
+                    .map(|(arg1, arg2)| {
+                        least_upper_bound(arg1.clone(), arg2.clone(), cache.clone())
+                    })
+                    .collect(),
+                greatest_lower_bound(ret1.clone(), ret2.clone(), cache),
+            ))
+        }
+        (Primitive(a), Primitive(b)) if a == b => Rc::new(Primitive(a.clone())),
+        (Record(a_fields), Record(b_fields)) => {
+            let all_keys: ImSet<String> = a_fields.keys().chain(b_fields.keys()).collect();
+            let fields = all_keys
+                .iter()
+                .map(|key| {
+                    let value = match (a_fields.get(key), b_fields.get(key)) {
+                        (None, None) => panic!("at least one of these should have each key"),
+                        (None, Some(value)) | (Some(value), None) => value.clone(),
+                        (Some(a_value), Some(b_value)) => {
+                            greatest_lower_bound(a_value.clone(), b_value.clone(), cache.clone())
+                        }
+                    };
+                    (key.clone(), value)
+                })
+                .collect();
+            Rc::new(Record(fields))
+        }
+        _ => panic!(
+            "type error, cannot unify least upper bounds: {:?} {:?}",
+            a, b
+        ),
+    }
+}
+
+fn least_upper_bound_concrete(
+    a: Rc<ConcreteType>,
+    b: Rc<ConcreteType>,
+    cache: ConstraintCache,
+) -> Rc<ConcreteType> {
+    use ConcreteType::*;
+    match (&*a, &*b) {
+        (Bottom, _) => b,
+        (_, Bottom) => a,
+        (Top, _) | (_, Top) => Rc::new(Top),
+        (Function(args1, ret1), Function(args2, ret2)) => {
+            assert_eq!(
+                args1.len(),
+                args2.len(),
+                "function called with the wrong number of arguments"
+            );
+            Rc::new(Function(
+                args1
+                    .iter()
+                    .zip(args2.iter())
+                    .map(|(arg1, arg2)| {
+                        greatest_lower_bound(arg1.clone(), arg2.clone(), cache.clone())
+                    })
+                    .collect(),
+                least_upper_bound(ret1.clone(), ret2.clone(), cache),
+            ))
+        }
+        (Primitive(a), Primitive(b)) if a == b => Rc::new(Primitive(a.clone())),
+        (Record(a_fields), Record(b_fields)) => {
+            let all_keys: ImSet<String> = a_fields.keys().chain(b_fields.keys()).collect();
+            let fields = all_keys
+                .iter()
+                .map(|key| {
+                    let value = match (a_fields.get(key), b_fields.get(key)) {
+                        (None, None) => panic!("at least one of these should have each key"),
+                        (None, Some(value)) | (Some(value), None) => value.clone(),
+                        (Some(a_value), Some(b_value)) => {
+                            least_upper_bound(a_value.clone(), b_value.clone(), cache.clone())
+                        }
+                    };
+                    (key.clone(), value)
+                })
+                .collect();
+            Rc::new(Record(fields))
+        }
+        _ => panic!(
+            "type error, cannot unify least upper bounds: {:?} {:?}",
+            a, b
+        ),
+    }
+}
+
+fn greatest_lower_bound(
+    a: Rc<SimpleType>,
+    b: Rc<SimpleType>,
+    cache: ConstraintCache,
+) -> Rc<SimpleType> {
+    use SimpleType::*;
+    match (&*a, &*b) {
+        (Concrete(a), Concrete(b)) => {
+            let c = greatest_lower_bound_concrete(a.clone(), b.clone(), cache);
+            Rc::new(Concrete(c))
+        }
+        (Variable(a), Variable(b)) => {
+            Rc::new(Variable(unify_and_replace(a.clone(), b.clone(), cache)))
+        }
+        (Variable(v), Concrete(c)) => {
+            v.borrow_mut()
+                .borrow_mut()
+                .new_upper_bound(c.clone(), cache);
+            a
+        }
+        (Concrete(c), Variable(v)) => {
+            v.borrow_mut()
+                .borrow_mut()
+                .new_upper_bound(c.clone(), cache);
+            b
+        }
+    }
+}
+
+fn least_upper_bound(
+    a: Rc<SimpleType>,
+    b: Rc<SimpleType>,
+    cache: ConstraintCache,
+) -> Rc<SimpleType> {
+    use SimpleType::*;
+    match (&*a, &*b) {
+        (Concrete(a), Concrete(b)) => {
+            let c = least_upper_bound_concrete(a.clone(), b.clone(), cache);
+            Rc::new(Concrete(c))
+        }
+        (Variable(a), Variable(b)) => {
+            Rc::new(Variable(unify_and_replace(a.clone(), b.clone(), cache)))
+        }
+        (Variable(v), Concrete(c)) => {
+            v.borrow_mut()
+                .borrow_mut()
+                .new_lower_bound(c.clone(), cache);
+            a
+        }
+        (Concrete(c), Variable(v)) => {
+            v.borrow_mut()
+                .borrow_mut()
+                .new_lower_bound(c.clone(), cache);
+            b
+        }
+    }
+}
+
+fn constrain_(subtype: Rc<SimpleType>, supertype: Rc<SimpleType>, cache: ConstraintCache) {
+    use ConcreteType::*;
+    use SimpleType::*;
+    if cache
         .borrow_mut()
         .insert((subtype.clone(), supertype.clone()))
     {
         match (&*subtype, &*supertype) {
-            (Concrete(Primitive(n1)), Concrete(Primitive(n2))) if n1 == n2 => (), // all good
-            (Concrete(Function(args1, ret1)), Concrete(Function(args2, ret2))) => {
-                if args1.len() != args2.len() {
-                    type_error(format!(
-                        "called function with {} arguments, but it only takes {}",
-                        args2.len(),
-                        args1.len()
-                    ));
-                }
-                for (arg1, arg2) in args1.iter().zip(args2.iter()) {
-                    constrain_(arg2.clone(), arg1.clone(), constraint_cache.clone());
-                }
-                constrain_(ret1.clone(), ret2.clone(), constraint_cache);
-            }
-            (Concrete(Record(fields1)), Concrete(Record(fields2))) => {
-                for (field, value2) in fields2.iter() {
-                    match fields1.get(field) {
-                        Some(value1) => {
-                            constrain_(value1.clone(), value2.clone(), constraint_cache.clone())
+            (Concrete(subtype_c), Concrete(supertype_c)) => {
+                match (&**subtype_c, &**supertype_c) {
+                    (Bottom, _) | (_, Top) => (),
+                    (Primitive(n1), Primitive(n2)) if n1 == n2 => (), // all good
+                    (Function(args1, ret1), Function(args2, ret2)) => {
+                        if args1.len() != args2.len() {
+                            type_error(format!(
+                                "called function with {} arguments, but it only takes {}",
+                                args2.len(),
+                                args1.len()
+                            ));
                         }
-                        None => type_error(format!("missing field {}", field)),
+                        for (arg1, arg2) in args1.iter().zip(args2.iter()) {
+                            constrain_(arg2.clone(), arg1.clone(), cache.clone());
+                        }
+                        constrain_(ret1.clone(), ret2.clone(), cache);
                     }
+                    (Record(fields1), Record(fields2)) => {
+                        for (field, value2) in fields2.iter() {
+                            match fields1.get(field) {
+                                Some(value1) => {
+                                    constrain_(value1.clone(), value2.clone(), cache.clone())
+                                }
+                                None => type_error(format!("missing field {}", field)),
+                            }
+                        }
+                    }
+                    _ => type_error(format!(
+                        "cannot constrain concrete types {:?} <: {:?}",
+                        subtype_c, supertype_c
+                    )),
                 }
             }
-            // (Variable(state1), Variable(state2)) => {
-            //     {
-            //         let state1_cell = state1.borrow_mut();
-            //         let state1_mut = state1_cell.borrow_mut();
-            //         let state2_cell = state1.borrow_mut();
-            //         let state2_mut = state1_cell.borrow_mut();
-            //         for lower_bound in (*state1_mut).lower_bounds.iter() {
-            //             for upper_bound in (*state2_mut).upper_bounds.iter() {}
-            //         }
-            //     }
-            //     unimplemented!()
-            // }
-            (Variable(variable_state), _) => {
+            (Variable(state1), Variable(state2)) => {
+                unify_and_replace(state1.clone(), state2.clone(), cache);
+            }
+            (Variable(variable_state), Concrete(supertype)) => {
                 variable_state
                     .borrow_mut()
                     .borrow_mut()
-                    .upper_bounds
-                    .insert(supertype.clone());
-                for lower_bound in variable_state.borrow().borrow().lower_bounds.iter() {
-                    constrain_(
-                        lower_bound.clone(),
-                        supertype.clone(),
-                        constraint_cache.clone(),
-                    )
-                }
+                    .new_upper_bound(supertype.clone(), cache);
             }
-            (_, Variable(variable_state)) => {
+            (Concrete(subtype), Variable(variable_state)) => {
                 variable_state
                     .borrow_mut()
                     .borrow_mut()
-                    .lower_bounds
-                    .insert(subtype.clone());
-                for upper_bound in variable_state.borrow().borrow().upper_bounds.iter() {
-                    constrain_(
-                        subtype.clone(),
-                        upper_bound.clone(),
-                        constraint_cache.clone(),
-                    )
-                }
+                    .new_lower_bound(subtype.clone(), cache);
             }
             _ => type_error(format!("cannot constrain {:?} <: {:?}", subtype, supertype)),
         }
@@ -97,13 +273,17 @@ fn constrain(subtype: Rc<SimpleType>, supertype: Rc<SimpleType>) {
     constrain_(subtype, supertype, constraint_cache)
 }
 
+fn primitive_simple_type(p: Primitive) -> Rc<SimpleType> {
+    Rc::new(SimpleType::Concrete(Rc::new(ConcreteType::Primitive(p))))
+}
+
 fn typecheck_statements(
     statements: &Statements,
     var_ctx: &ImMap<String, Rc<dyn MaybeQuantified>>,
 ) -> Rc<SimpleType> {
     use Statements::*;
     match statements {
-        Empty => Rc::new(SimpleType::Concrete(ConcreteType::Primitive(Primitive::Unit))),
+        Empty => primitive_simple_type(Primitive::Unit),
         Sequence(expr, rest) => {
             let expr_type = typecheck_expr(expr, var_ctx);
             match &**rest {
@@ -120,19 +300,15 @@ fn typecheck_statements(
     }
 }
 
-fn primitive_simple_type(p : Primitive) -> Rc<SimpleType> {
-    Rc::new(SimpleType::Concrete(ConcreteType::Primitive(p)))
-}
-
 fn typecheck_expr(expr: &Expr, var_ctx: &ImMap<String, Rc<dyn MaybeQuantified>>) -> Rc<SimpleType> {
     use crate::ast::Constant::*;
     use Expr::*;
     let simple_type = match expr {
         Constant(Bool(_)) => primitive_simple_type(Primitive::Bool),
         Constant(Int(_)) => primitive_simple_type(Primitive::Int),
-        Constant(String(_)) =>primitive_simple_type(Primitive::String),
-        Constant(Float(_)) =>primitive_simple_type(Primitive::Float),
-        Constant(Unit) =>primitive_simple_type(Primitive::Unit),
+        Constant(String(_)) => primitive_simple_type(Primitive::String),
+        Constant(Float(_)) => primitive_simple_type(Primitive::Float),
+        Constant(Unit) => primitive_simple_type(Primitive::Unit),
         Var(name) => match var_ctx.get(name) {
             Some(maybe_quantified) => maybe_quantified.clone().instantiate(),
             None => type_error(format!("variable \"{}\" not found", name)),
@@ -142,10 +318,10 @@ fn typecheck_expr(expr: &Expr, var_ctx: &ImMap<String, Rc<dyn MaybeQuantified>>)
                 Some(Pattern::Var(name)) => {
                     let param = SimpleType::fresh_var();
                     let var_ctx = var_ctx.update(name.clone(), param.clone());
-                    Rc::new(SimpleType::Concrete(ConcreteType::Function(
+                    Rc::new(SimpleType::Concrete(Rc::new(ConcreteType::Function(
                         vec![param],
                         typecheck_expr(expr, &var_ctx),
-                    )))
+                    ))))
                 }
                 _ =>
                 // TODO: This should be able to typecheck all the patterns
@@ -160,33 +336,33 @@ fn typecheck_expr(expr: &Expr, var_ctx: &ImMap<String, Rc<dyn MaybeQuantified>>)
                 .iter()
                 .map(|arg| typecheck_expr(arg, var_ctx))
                 .collect::<Vec<_>>();
-            let f_type = Rc::new(SimpleType::Concrete(ConcreteType::Function(arg_types, return_type.clone())));
+            let f_type = Rc::new(SimpleType::Concrete(Rc::new(ConcreteType::Function(
+                arg_types,
+                return_type.clone(),
+            ))));
             constrain(typecheck_expr(f, var_ctx), f_type);
             return_type
         }
-        Record(fields) => Rc::new(SimpleType::Concrete(ConcreteType::Record(
+        Record(fields) => Rc::new(SimpleType::Concrete(Rc::new(ConcreteType::Record(
             fields
                 .iter()
                 .map(|(name, expr)| (name.clone(), typecheck_expr(expr, &var_ctx)))
                 .collect::<ImMap<_, _>>(),
-        ))),
+        )))),
         FieldAccess(expr, name) => {
             let return_type = SimpleType::fresh_var();
             constrain(
                 typecheck_expr(expr, var_ctx),
-                Rc::new(SimpleType::Concrete(ConcreteType::Record(
+                Rc::new(SimpleType::Concrete(Rc::new(ConcreteType::Record(
                     im::hashmap! {name.clone() => return_type.clone()},
-                ))),
+                )))),
             );
             return_type
         }
         Block(statements) => typecheck_statements(statements, &var_ctx),
         If(condition, true_branch, false_branch) => {
             let condition_type = typecheck_expr(condition, &var_ctx);
-            constrain(
-                condition_type,
-                primitive_simple_type(Primitive::Bool),
-            );
+            constrain(condition_type, primitive_simple_type(Primitive::Bool));
             let return_type = SimpleType::fresh_var();
             let true_type = typecheck_expr(true_branch, &var_ctx);
             let false_type = match false_branch {
@@ -205,13 +381,44 @@ fn typecheck_expr(expr: &Expr, var_ctx: &ImMap<String, Rc<dyn MaybeQuantified>>)
 
 pub struct PolymorphicType(Rc<SimpleType>);
 
-fn freshen_type(
-    simple_type: &Rc<SimpleType>,
-    qvar_context: Rc<RefCell<MutMap<String, Rc<RefCell<RefCell<VariableState>>>>>>,
+fn freshen_concrete_type(
+    c: Rc<ConcreteType>,
+    qvar_context: Rc<RefCell<MutMap<String, DoubleRef<VariableState>>>>,
+) -> Rc<ConcreteType> {
+    use ConcreteType::*;
+    match &*c {
+        Top | Bottom | Primitive(_) => c.clone(),
+        Function(ref args, ref ret) => {
+            let args = args
+                .iter()
+                .map(|arg| freshen_simple_type(arg.clone(), qvar_context.clone()))
+                .collect();
+            Rc::new(Function(
+                args,
+                freshen_simple_type(ret.clone(), qvar_context.clone()),
+            ))
+        }
+        Record(ref fields) => {
+            let fields = fields
+                .iter()
+                .map(|(name, simple_type)| {
+                    (
+                        name.clone(),
+                        freshen_simple_type(simple_type.clone(), qvar_context.clone()),
+                    )
+                })
+                .collect();
+            Rc::new(Record(fields))
+        }
+    }
+}
+
+fn freshen_simple_type(
+    simple_type: Rc<SimpleType>,
+    qvar_context: Rc<RefCell<MutMap<String, DoubleRef<VariableState>>>>,
 ) -> Rc<SimpleType> {
     use SimpleType::*;
-    use ConcreteType::*;
-    match *simple_type.clone() {
+    match &*simple_type.clone() {
         Variable(ref state) => {
             let existing_name = state.borrow().borrow().unique_name.clone();
             let new_state = {
@@ -221,57 +428,34 @@ fn freshen_type(
             // Freshen the constraints as well - a bit wordy.
             let new_state = match new_state {
                 None => {
-                    let new_state = Rc::new(RefCell::new(RefCell::new(VariableState {
-                        lower_bounds: state
-                            .borrow()
-                            .borrow()
-                            .lower_bounds
-                            .iter()
-                            .map(|simple_type| freshen_type(simple_type, qvar_context.clone()))
-                            .collect(),
-                        upper_bounds: state
-                            .borrow()
-                            .borrow()
-                            .upper_bounds
-                            .iter()
-                            .map(|simple_type| freshen_type(simple_type, qvar_context.clone()))
-                            .collect(),
+                    let new_state = new_double_ref(VariableState {
+                        lower_bound: freshen_concrete_type(
+                            state.borrow().borrow().lower_bound.clone(),
+                            qvar_context.clone(),
+                        ),
+                        upper_bound: freshen_concrete_type(
+                            state.borrow().borrow().upper_bound.clone(),
+                            qvar_context.clone(),
+                        ),
                         unique_name: unique_name(),
-                    })));
-                    qvar_context.borrow_mut().insert(existing_name, new_state.clone());
+                    });
+                    qvar_context
+                        .borrow_mut()
+                        .insert(existing_name, new_state.clone());
                     new_state
                 }
                 Some(new_state) => new_state.clone(),
             };
             Rc::new(Variable(new_state.clone()))
         }
-        Concrete(Primitive(_)) => simple_type.clone(),
-        Concrete(Function(ref args, ref ret)) => {
-            let args = args
-                .iter()
-                .map(|arg| freshen_type(arg, qvar_context.clone()))
-                .collect();
-            Rc::new(Concrete(Function(args, freshen_type(ret, qvar_context.clone()))))
-        }
-        Concrete(Record(ref fields)) => {
-            let fields = fields
-                .iter()
-                .map(|(name, simple_type)| {
-                    (
-                        name.clone(),
-                        freshen_type(simple_type, qvar_context.clone()),
-                    )
-                })
-                .collect();
-            Rc::new(Concrete(Record(fields)))
-        }
+        Concrete(c) => Rc::new(Concrete(freshen_concrete_type(c.clone(), qvar_context))),
     }
 }
 
 impl MaybeQuantified for PolymorphicType {
     fn instantiate(self: Rc<Self>) -> Rc<SimpleType> {
         let qvar_context = MutMap::new();
-        freshen_type(&self.0, Rc::new(RefCell::new(qvar_context)))
+        freshen_simple_type(self.0.clone(), Rc::new(RefCell::new(qvar_context)))
     }
 }
 
