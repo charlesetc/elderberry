@@ -24,11 +24,13 @@ trait Constraints {
 
 impl Constraints for VariableState {
     fn new_lower_bound(&mut self, lower_bound: Rc<ConcreteType>, cache: ConstraintCache) {
-        self.lower_bound = least_upper_bound_concrete(self.lower_bound.clone(), lower_bound, cache);
+        self.lower_bound = least_upper_bound_concrete(self.lower_bound.clone(), lower_bound.clone(), cache.clone());
+        constrain_concrete_types(lower_bound, self.upper_bound.clone(), cache);
     }
     fn new_upper_bound(&mut self, upper_bound: Rc<ConcreteType>, cache: ConstraintCache) {
         self.upper_bound =
-            greatest_lower_bound_concrete(self.upper_bound.clone(), upper_bound, cache);
+            greatest_lower_bound_concrete(self.upper_bound.clone(), upper_bound.clone(), cache.clone());
+        constrain_concrete_types(self.lower_bound.clone(), upper_bound, cache);
     }
 }
 
@@ -197,47 +199,51 @@ fn least_upper_bound(
     }
 }
 
-fn constrain_(subtype: Rc<SimpleType>, supertype: Rc<SimpleType>, cache: ConstraintCache) {
+fn constrain_concrete_types(
+    subtype: Rc<ConcreteType>,
+    supertype: Rc<ConcreteType>,
+    cache: ConstraintCache,
+) {
     use ConcreteType::*;
+    match (&*subtype, &*supertype) {
+        (Bottom, _) | (_, Top) => (),
+        (Primitive(n1), Primitive(n2)) if n1 == n2 => (), // all good
+        (Function(args1, ret1), Function(args2, ret2)) => {
+            if args1.len() != args2.len() {
+                type_error(format!(
+                    "called function with {} arguments, but it only takes {}",
+                    args2.len(),
+                    args1.len()
+                ));
+            }
+            for (arg1, arg2) in args1.iter().zip(args2.iter()) {
+                constrain_(arg2.clone(), arg1.clone(), cache.clone());
+            }
+            constrain_(ret1.clone(), ret2.clone(), cache);
+        }
+        (Record(fields1), Record(fields2)) => {
+            for (field, value2) in fields2.iter() {
+                match fields1.get(field) {
+                    Some(value1) => constrain_(value1.clone(), value2.clone(), cache.clone()),
+                    None => type_error(format!("missing field {}", field)),
+                }
+            }
+        }
+        _ => type_error(format!(
+            "cannot constrain {:?} <: {:?}",
+            subtype, supertype
+        )),
+    }
+}
+
+fn constrain_(subtype: Rc<SimpleType>, supertype: Rc<SimpleType>, cache: ConstraintCache) {
     use SimpleType::*;
     if cache
         .borrow_mut()
         .insert((subtype.clone(), supertype.clone()))
     {
         match (&*subtype, &*supertype) {
-            (Concrete(subtype_c), Concrete(supertype_c)) => {
-                match (&**subtype_c, &**supertype_c) {
-                    (Bottom, _) | (_, Top) => (),
-                    (Primitive(n1), Primitive(n2)) if n1 == n2 => (), // all good
-                    (Function(args1, ret1), Function(args2, ret2)) => {
-                        if args1.len() != args2.len() {
-                            type_error(format!(
-                                "called function with {} arguments, but it only takes {}",
-                                args2.len(),
-                                args1.len()
-                            ));
-                        }
-                        for (arg1, arg2) in args1.iter().zip(args2.iter()) {
-                            constrain_(arg2.clone(), arg1.clone(), cache.clone());
-                        }
-                        constrain_(ret1.clone(), ret2.clone(), cache);
-                    }
-                    (Record(fields1), Record(fields2)) => {
-                        for (field, value2) in fields2.iter() {
-                            match fields1.get(field) {
-                                Some(value1) => {
-                                    constrain_(value1.clone(), value2.clone(), cache.clone())
-                                }
-                                None => type_error(format!("missing field {}", field)),
-                            }
-                        }
-                    }
-                    _ => type_error(format!(
-                        "cannot constrain {:?} <: {:?}",
-                        subtype_c, supertype_c
-                    )),
-                }
-            }
+            (Concrete(subtype_c), Concrete(supertype_c)) => constrain_concrete_types(subtype_c.clone(), supertype_c.clone(), cache),
             (Variable(state1), Variable(state2)) => {
                 unify_and_replace(state1.clone(), state2.clone(), cache);
             }
