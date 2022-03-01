@@ -17,6 +17,13 @@ type VarName = String;
 type FieldName = String;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ConcreteType {
+    Primitive(Primitive),
+    Function(Vec<Rc<SimpleType>>, Rc<SimpleType>),
+    Record(ImMap<FieldName, Rc<SimpleType>>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct VariableState {
     pub lower_bounds: ImSet<Rc<SimpleType>>,
     pub upper_bounds: ImSet<Rc<SimpleType>>,
@@ -30,9 +37,7 @@ pub struct VariableState {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SimpleType {
     Variable(Rc<RefCell<RefCell<VariableState>>>),
-    Primitive(Primitive),
-    Function(Vec<Rc<SimpleType>>, Rc<SimpleType>),
-    Record(ImMap<FieldName, Rc<SimpleType>>),
+    Concrete(ConcreteType),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -94,8 +99,8 @@ impl SimpleType {
         in_process: ImSet<PolarVariable>,
     ) -> AstType {
         match &*simple_type {
-            SimpleType::Primitive(p) => AstType::Primitive(p.clone()),
-            SimpleType::Record(fields) => {
+            SimpleType::Concrete(ConcreteType::Primitive(p)) => AstType::Primitive(p.clone()),
+            SimpleType::Concrete(ConcreteType::Record(fields)) => {
                 let fields = fields
                     .iter()
                     .map(|(name, field_type)| {
@@ -112,7 +117,7 @@ impl SimpleType {
                     .collect::<Vec<_>>();
                 AstType::Record(fields)
             }
-            SimpleType::Function(args, ret) => {
+            SimpleType::Concrete(ConcreteType::Function(args, ret)) => {
                 let args = args
                     .iter()
                     .map(|arg| {

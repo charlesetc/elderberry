@@ -1,5 +1,5 @@
 use crate::ast::*;
-use crate::types::{unique_name, AstType, MaybeQuantified, Primitive, SimpleType, VariableState};
+use crate::types::{unique_name, AstType, MaybeQuantified, Primitive, SimpleType, VariableState, ConcreteType};
 use im::HashMap as ImMap;
 use std::cell::RefCell;
 use std::collections::BTreeSet as MutSet;
@@ -17,13 +17,14 @@ fn constrain_(
     constraint_cache: Rc<RefCell<MutSet<(Rc<SimpleType>, Rc<SimpleType>)>>>,
 ) {
     use SimpleType::*;
+    use ConcreteType::*;
     if constraint_cache
         .borrow_mut()
         .insert((subtype.clone(), supertype.clone()))
     {
         match (&*subtype, &*supertype) {
-            (Primitive(n1), Primitive(n2)) if n1 == n2 => (), // all good
-            (Function(args1, ret1), Function(args2, ret2)) => {
+            (Concrete(Primitive(n1)), Concrete(Primitive(n2))) if n1 == n2 => (), // all good
+            (Concrete(Function(args1, ret1)), Concrete(Function(args2, ret2))) => {
                 if args1.len() != args2.len() {
                     type_error(format!(
                         "called function with {} arguments, but it only takes {}",
@@ -36,7 +37,7 @@ fn constrain_(
                 }
                 constrain_(ret1.clone(), ret2.clone(), constraint_cache);
             }
-            (Record(fields1), Record(fields2)) => {
+            (Concrete(Record(fields1)), Concrete(Record(fields2))) => {
                 for (field, value2) in fields2.iter() {
                     match fields1.get(field) {
                         Some(value1) => {
@@ -102,7 +103,7 @@ fn typecheck_statements(
 ) -> Rc<SimpleType> {
     use Statements::*;
     match statements {
-        Empty => Rc::new(SimpleType::Primitive(Primitive::Unit)),
+        Empty => Rc::new(SimpleType::Concrete(ConcreteType::Primitive(Primitive::Unit))),
         Sequence(expr, rest) => {
             let expr_type = typecheck_expr(expr, var_ctx);
             match &**rest {
@@ -119,15 +120,19 @@ fn typecheck_statements(
     }
 }
 
+fn primitive_simple_type(p : Primitive) -> Rc<SimpleType> {
+    Rc::new(SimpleType::Concrete(ConcreteType::Primitive(p)))
+}
+
 fn typecheck_expr(expr: &Expr, var_ctx: &ImMap<String, Rc<dyn MaybeQuantified>>) -> Rc<SimpleType> {
     use crate::ast::Constant::*;
     use Expr::*;
     let simple_type = match expr {
-        Constant(Bool(_)) => Rc::new(SimpleType::Primitive(Primitive::Bool)),
-        Constant(Int(_)) => Rc::new(SimpleType::Primitive(Primitive::Int)),
-        Constant(String(_)) => Rc::new(SimpleType::Primitive(Primitive::String)),
-        Constant(Float(_)) => Rc::new(SimpleType::Primitive(Primitive::Float)),
-        Constant(Unit) => Rc::new(SimpleType::Primitive(Primitive::Unit)),
+        Constant(Bool(_)) => primitive_simple_type(Primitive::Bool),
+        Constant(Int(_)) => primitive_simple_type(Primitive::Int),
+        Constant(String(_)) =>primitive_simple_type(Primitive::String),
+        Constant(Float(_)) =>primitive_simple_type(Primitive::Float),
+        Constant(Unit) =>primitive_simple_type(Primitive::Unit),
         Var(name) => match var_ctx.get(name) {
             Some(maybe_quantified) => maybe_quantified.clone().instantiate(),
             None => type_error(format!("variable \"{}\" not found", name)),
@@ -137,10 +142,10 @@ fn typecheck_expr(expr: &Expr, var_ctx: &ImMap<String, Rc<dyn MaybeQuantified>>)
                 Some(Pattern::Var(name)) => {
                     let param = SimpleType::fresh_var();
                     let var_ctx = var_ctx.update(name.clone(), param.clone());
-                    Rc::new(SimpleType::Function(
+                    Rc::new(SimpleType::Concrete(ConcreteType::Function(
                         vec![param],
                         typecheck_expr(expr, &var_ctx),
-                    ))
+                    )))
                 }
                 _ =>
                 // TODO: This should be able to typecheck all the patterns
@@ -155,23 +160,23 @@ fn typecheck_expr(expr: &Expr, var_ctx: &ImMap<String, Rc<dyn MaybeQuantified>>)
                 .iter()
                 .map(|arg| typecheck_expr(arg, var_ctx))
                 .collect::<Vec<_>>();
-            let f_type = Rc::new(SimpleType::Function(arg_types, return_type.clone()));
+            let f_type = Rc::new(SimpleType::Concrete(ConcreteType::Function(arg_types, return_type.clone())));
             constrain(typecheck_expr(f, var_ctx), f_type);
             return_type
         }
-        Record(fields) => Rc::new(SimpleType::Record(
+        Record(fields) => Rc::new(SimpleType::Concrete(ConcreteType::Record(
             fields
                 .iter()
                 .map(|(name, expr)| (name.clone(), typecheck_expr(expr, &var_ctx)))
                 .collect::<ImMap<_, _>>(),
-        )),
+        ))),
         FieldAccess(expr, name) => {
             let return_type = SimpleType::fresh_var();
             constrain(
                 typecheck_expr(expr, var_ctx),
-                Rc::new(SimpleType::Record(
+                Rc::new(SimpleType::Concrete(ConcreteType::Record(
                     im::hashmap! {name.clone() => return_type.clone()},
-                )),
+                ))),
             );
             return_type
         }
@@ -180,13 +185,13 @@ fn typecheck_expr(expr: &Expr, var_ctx: &ImMap<String, Rc<dyn MaybeQuantified>>)
             let condition_type = typecheck_expr(condition, &var_ctx);
             constrain(
                 condition_type,
-                Rc::new(SimpleType::Primitive(Primitive::Bool)),
+                primitive_simple_type(Primitive::Bool),
             );
             let return_type = SimpleType::fresh_var();
             let true_type = typecheck_expr(true_branch, &var_ctx);
             let false_type = match false_branch {
                 Some(false_branch) => typecheck_expr(false_branch, &var_ctx),
-                None => Rc::new(SimpleType::Primitive(Primitive::Unit)),
+                None => primitive_simple_type(Primitive::Unit),
             };
             constrain(true_type, return_type.clone());
             constrain(false_type, return_type.clone());
@@ -205,6 +210,7 @@ fn freshen_type(
     qvar_context: Rc<RefCell<MutMap<String, Rc<RefCell<RefCell<VariableState>>>>>>,
 ) -> Rc<SimpleType> {
     use SimpleType::*;
+    use ConcreteType::*;
     match *simple_type.clone() {
         Variable(ref state) => {
             let existing_name = state.borrow().borrow().unique_name.clone();
@@ -239,15 +245,15 @@ fn freshen_type(
             };
             Rc::new(Variable(new_state.clone()))
         }
-        Primitive(_) => simple_type.clone(),
-        Function(ref args, ref ret) => {
+        Concrete(Primitive(_)) => simple_type.clone(),
+        Concrete(Function(ref args, ref ret)) => {
             let args = args
                 .iter()
                 .map(|arg| freshen_type(arg, qvar_context.clone()))
                 .collect();
-            Rc::new(Function(args, freshen_type(ret, qvar_context.clone())))
+            Rc::new(Concrete(Function(args, freshen_type(ret, qvar_context.clone()))))
         }
-        Record(ref fields) => {
+        Concrete(Record(ref fields)) => {
             let fields = fields
                 .iter()
                 .map(|(name, simple_type)| {
@@ -257,7 +263,7 @@ fn freshen_type(
                     )
                 })
                 .collect();
-            Rc::new(Record(fields))
+            Rc::new(Concrete(Record(fields)))
         }
     }
 }
