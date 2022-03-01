@@ -32,11 +32,11 @@ pub struct VariableState {
     pub unique_name: VarName,
 }
 
-pub type DoubleRef<T> = Rc<RefCell<Rc<RefCell<T>>>>;
+pub type DoubleRef<T> = Rc<RefCell<T>>;
 
 
 pub fn new_double_ref<T>(t: T) -> DoubleRef<T> {
-    Rc::new(RefCell::new(Rc::new(RefCell::new(t))))
+    Rc::new(RefCell::new(t))
 }
 
 // We have two refcells here so we can "unify" vars by replacing one
@@ -107,6 +107,10 @@ impl SimpleType {
         polar: bool,
         in_process: ImSet<PolarVariable>,
     ) -> AstType {
+        // match &*simple_type {
+        //     SimpleType::Concrete(Rc::new(ConcreteType::Primitive(p))) => AstType::Primitive(p.clone()),
+        //     _ => unimplemented!()
+        // }
         unimplemented!()
         // match &*simple_type {
         //     SimpleType::Concrete(ConcreteType::Primitive(p)) => AstType::Primitive(p.clone()),

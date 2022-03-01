@@ -1,7 +1,7 @@
 use crate::ast::*;
 use crate::types::{
-    unique_name, new_double_ref, AstType, ConcreteType, DoubleRef, MaybeQuantified, Primitive, SimpleType,
-    VariableState,
+    new_double_ref, unique_name, AstType, ConcreteType, DoubleRef, MaybeQuantified, Primitive,
+    SimpleType, VariableState,
 };
 use im::HashMap as ImMap;
 use im::HashSet as ImSet;
@@ -39,11 +39,9 @@ fn unify_and_replace(
 ) -> DoubleRef<VariableState> {
     {
         a.borrow_mut()
-            .borrow_mut()
-            .new_lower_bound(b.borrow().borrow().lower_bound.clone(), cache.clone());
+            .new_lower_bound(b.borrow().lower_bound.clone(), cache.clone());
         a.borrow_mut()
-            .borrow_mut()
-            .new_upper_bound(b.borrow().borrow().upper_bound.clone(), cache);
+            .new_upper_bound(b.borrow().upper_bound.clone(), cache);
     };
     b.replace(a.borrow().clone());
     a
@@ -164,15 +162,11 @@ fn greatest_lower_bound(
             Rc::new(Variable(unify_and_replace(a.clone(), b.clone(), cache)))
         }
         (Variable(v), Concrete(c)) => {
-            v.borrow_mut()
-                .borrow_mut()
-                .new_upper_bound(c.clone(), cache);
+            v.borrow_mut().new_upper_bound(c.clone(), cache);
             a
         }
         (Concrete(c), Variable(v)) => {
-            v.borrow_mut()
-                .borrow_mut()
-                .new_upper_bound(c.clone(), cache);
+            v.borrow_mut().new_upper_bound(c.clone(), cache);
             b
         }
     }
@@ -193,15 +187,11 @@ fn least_upper_bound(
             Rc::new(Variable(unify_and_replace(a.clone(), b.clone(), cache)))
         }
         (Variable(v), Concrete(c)) => {
-            v.borrow_mut()
-                .borrow_mut()
-                .new_lower_bound(c.clone(), cache);
+            v.borrow_mut().new_lower_bound(c.clone(), cache);
             a
         }
         (Concrete(c), Variable(v)) => {
-            v.borrow_mut()
-                .borrow_mut()
-                .new_lower_bound(c.clone(), cache);
+            v.borrow_mut().new_lower_bound(c.clone(), cache);
             b
         }
     }
@@ -243,7 +233,7 @@ fn constrain_(subtype: Rc<SimpleType>, supertype: Rc<SimpleType>, cache: Constra
                         }
                     }
                     _ => type_error(format!(
-                        "cannot constrain concrete types {:?} <: {:?}",
+                        "cannot constrain {:?} <: {:?}",
                         subtype_c, supertype_c
                     )),
                 }
@@ -254,16 +244,13 @@ fn constrain_(subtype: Rc<SimpleType>, supertype: Rc<SimpleType>, cache: Constra
             (Variable(variable_state), Concrete(supertype)) => {
                 variable_state
                     .borrow_mut()
-                    .borrow_mut()
                     .new_upper_bound(supertype.clone(), cache);
             }
             (Concrete(subtype), Variable(variable_state)) => {
                 variable_state
                     .borrow_mut()
-                    .borrow_mut()
                     .new_lower_bound(subtype.clone(), cache);
             }
-            _ => type_error(format!("cannot constrain {:?} <: {:?}", subtype, supertype)),
         }
     }
 }
@@ -420,7 +407,7 @@ fn freshen_simple_type(
     use SimpleType::*;
     match &*simple_type.clone() {
         Variable(ref state) => {
-            let existing_name = state.borrow().borrow().unique_name.clone();
+            let existing_name = state.borrow().unique_name.clone();
             let new_state = {
                 let qvar_context = qvar_context.borrow();
                 qvar_context.get(&existing_name).map(|x| x.clone())
@@ -430,11 +417,11 @@ fn freshen_simple_type(
                 None => {
                     let new_state = new_double_ref(VariableState {
                         lower_bound: freshen_concrete_type(
-                            state.borrow().borrow().lower_bound.clone(),
+                            state.borrow().lower_bound.clone(),
                             qvar_context.clone(),
                         ),
                         upper_bound: freshen_concrete_type(
-                            state.borrow().borrow().upper_bound.clone(),
+                            state.borrow().upper_bound.clone(),
                             qvar_context.clone(),
                         ),
                         unique_name: unique_name(),
