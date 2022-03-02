@@ -1,4 +1,4 @@
-use im::HashMap as ImMap;
+use im::OrdMap as ImMap;
 use im::OrdSet as ImSet;
 use std::cell::RefCell;
 use std::collections::BTreeSet as MutSet;
@@ -31,7 +31,6 @@ pub struct VariableState {
     pub upper_bound: Rc<ConcreteType>,
     pub unique_name: VarName,
 }
-
 
 // We have two refcells here so we can "unify" vars by replacing one
 // This way future edits to the VariableState affect all occurrences of the variable.
@@ -96,7 +95,7 @@ impl AstType {
                     let set = if polarity { positive } else { negative };
                     set.borrow_mut().insert(var.clone());
                 }
-                Intersection(a,b) | Union(a, b) => {
+                Intersection(a, b) | Union(a, b) => {
                     walk_polar_vars(a, positive.clone(), negative.clone(), polarity);
                     walk_polar_vars(b, positive, negative, polarity);
                 }
@@ -104,17 +103,22 @@ impl AstType {
         }
 
         walk_polar_vars(self, positive.clone(), negative.clone(), true);
-        
-        let polar_vars : ImSet<_> = positive.borrow().symmetric_difference(&negative.borrow()).collect();
+
+        let polar_vars: ImSet<_> = positive
+            .borrow()
+            .symmetric_difference(&negative.borrow())
+            .collect();
         polar_vars.clone()
     }
 
-    fn drop_vars(&self, polar_vars: &ImSet<VarName>, polarity : bool) -> AstType {
+    fn drop_vars(&self, polar_vars: &ImSet<VarName>, polarity: bool) -> AstType {
         use AstType::*;
         match self {
             Top | Bottom | Primitive(_) => self.clone(),
             Function(args, ret) => Function(
-                args.iter().map(|arg| arg.drop_vars(polar_vars, !polarity)).collect(),
+                args.iter()
+                    .map(|arg| arg.drop_vars(polar_vars, !polarity))
+                    .collect(),
                 Rc::new(ret.drop_vars(polar_vars, polarity)),
             ),
             Record(fields) => Record(
@@ -123,9 +127,10 @@ impl AstType {
                     .map(|(name, arg)| (name.clone(), arg.drop_vars(polar_vars, polarity)))
                     .collect(),
             ),
-            Recursive(var, ast_type) => {
-                Recursive(var.clone(), Rc::new(ast_type.drop_vars(polar_vars, polarity)))
-            }
+            Recursive(var, ast_type) => Recursive(
+                var.clone(),
+                Rc::new(ast_type.drop_vars(polar_vars, polarity)),
+            ),
             TypeVariable(name) => {
                 if polar_vars.contains(name) {
                     if polarity {
@@ -143,8 +148,12 @@ impl AstType {
                 {
                     unimplemented!("bug (u): if this happens we need to re-think how to drop vars.")
                 }
-                (TypeVariable(name), _) if polar_vars.contains(name) => b.drop_vars(polar_vars, polarity),
-                (_, TypeVariable(name)) if polar_vars.contains(name) => a.drop_vars(polar_vars, polarity),
+                (TypeVariable(name), _) if polar_vars.contains(name) => {
+                    b.drop_vars(polar_vars, polarity)
+                }
+                (_, TypeVariable(name)) if polar_vars.contains(name) => {
+                    a.drop_vars(polar_vars, polarity)
+                }
                 (_, _) => Union(
                     Rc::new(a.drop_vars(polar_vars, polarity)),
                     Rc::new(b.drop_vars(polar_vars, polarity)),
@@ -156,8 +165,12 @@ impl AstType {
                 {
                     unimplemented!("bug (i): if this happens we need to re-think how to drop vars.")
                 }
-                (TypeVariable(name), _) if polar_vars.contains(name) => b.drop_vars(polar_vars, polarity),
-                (_, TypeVariable(name)) if polar_vars.contains(name) => a.drop_vars(polar_vars, polarity),
+                (TypeVariable(name), _) if polar_vars.contains(name) => {
+                    b.drop_vars(polar_vars, polarity)
+                }
+                (_, TypeVariable(name)) if polar_vars.contains(name) => {
+                    a.drop_vars(polar_vars, polarity)
+                }
                 (_, _) => Intersection(
                     Rc::new(a.drop_vars(polar_vars, polarity)),
                     Rc::new(b.drop_vars(polar_vars, polarity)),

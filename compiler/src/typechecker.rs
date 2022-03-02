@@ -2,7 +2,7 @@ use crate::ast::*;
 use crate::types::{
     unique_name, AstType, ConcreteType, MaybeQuantified, Primitive, SimpleType, VariableState,
 };
-use im::HashMap as ImMap;
+use im::OrdMap as ImMap;
 use im::OrdSet as ImSet;
 use std::cell::RefCell;
 use std::collections::BTreeMap as MutMap;
@@ -22,12 +22,14 @@ fn new_lower_bound(
     cache: ConstraintCache,
 ) {
     let existing_lower_bound = state.borrow().lower_bound.clone();
-    state.borrow_mut().lower_bound = least_upper_bound_concrete(
+    let new_lower_bound = least_upper_bound_concrete(
         existing_lower_bound,
         lower_bound.clone(),
         cache.clone(),
     );
-    constrain_concrete_types(lower_bound, state.borrow().upper_bound.clone(), cache);
+    state.borrow_mut().lower_bound = new_lower_bound;
+    let upper_bound = state.borrow().upper_bound.clone();
+    constrain_concrete_types(lower_bound, upper_bound, cache);
 }
 fn new_upper_bound(
     state: Rc<RefCell<VariableState>>,
@@ -35,12 +37,16 @@ fn new_upper_bound(
     cache: ConstraintCache,
 ) {
     let existing_upper_bound = state.borrow().upper_bound.clone();
-    state.borrow_mut().upper_bound = greatest_lower_bound_concrete(
+    let new_upper_bound = greatest_lower_bound_concrete(
         existing_upper_bound,
         upper_bound.clone(),
         cache.clone(),
     );
-    constrain_concrete_types(state.borrow().lower_bound.clone(), upper_bound, cache);
+    {
+        state.borrow_mut().upper_bound = new_upper_bound;
+    }
+    let lower_bound = state.borrow().lower_bound.clone();
+    constrain_concrete_types(lower_bound, upper_bound, cache);
 }
 
 fn unify_and_replace(
@@ -48,9 +54,12 @@ fn unify_and_replace(
     b: Rc<RefCell<VariableState>>,
     cache: ConstraintCache,
 ) -> Rc<RefCell<VariableState>> {
-    new_lower_bound(a.clone(), b.borrow().lower_bound.clone(), cache.clone());
-    new_upper_bound(a.clone(), b.borrow().upper_bound.clone(), cache);
-    b.replace(a.borrow().clone());
+    let lower_bound = b.borrow().lower_bound.clone();
+    new_lower_bound(a.clone(), lower_bound, cache.clone());
+    let upper_bound = b.borrow().upper_bound.clone();
+    new_upper_bound(a.clone(), upper_bound, cache);
+    let new_b = a.borrow().clone();
+    b.replace(new_b);
     a
 }
 
@@ -240,7 +249,6 @@ fn constrain_concrete_types(
 
 fn constrain_(subtype: Rc<SimpleType>, supertype: Rc<SimpleType>, cache: ConstraintCache) {
     use SimpleType::*;
-
     if cache.borrow_mut().insert((subtype.clone(), supertype.clone())) {
         match (&*subtype, &*supertype) {
             (Concrete(subtype_c), Concrete(supertype_c)) => {
@@ -287,7 +295,13 @@ fn typecheck_statements(
             let var_ctx = var_ctx.update(name.clone(), expr_type);
             typecheck_statements(rest, &var_ctx)
         }
-        Let(Recursive, _, _, _) => unimplemented!(),
+        Let(Recursive, name, expr, rest) => {
+            // TODO: Maybe only allow this for functions?
+            let name_type = SimpleType::fresh_var();
+            let var_ctx = var_ctx.update(name.clone(), name_type.clone());
+            constrain(typecheck_expr(expr, &var_ctx), name_type);
+            typecheck_statements(rest, &var_ctx)
+        }
     }
 }
 
@@ -345,7 +359,7 @@ fn typecheck_expr(expr: &Expr, var_ctx: &ImMap<String, Rc<dyn MaybeQuantified>>)
             constrain(
                 typecheck_expr(expr, var_ctx),
                 Rc::new(SimpleType::Concrete(Rc::new(ConcreteType::Record(
-                    im::hashmap! {name.clone() => return_type.clone()},
+                    im::ordmap! {name.clone() => return_type.clone()},
                 )))),
             );
             return_type
@@ -419,13 +433,15 @@ fn freshen_simple_type(
             // Freshen the constraints as well - a bit wordy.
             let new_state = match new_state {
                 None => {
+                    let existing_lower_bound = state.borrow().lower_bound.clone();
+                    let existing_upper_bound = state.borrow().upper_bound.clone();
                     let new_state = Rc::new(RefCell::new(VariableState {
                         lower_bound: freshen_concrete_type(
-                            state.borrow().lower_bound.clone(),
+                            existing_lower_bound,
                             qvar_context.clone(),
                         ),
                         upper_bound: freshen_concrete_type(
-                            state.borrow().upper_bound.clone(),
+                            existing_upper_bound,
                             qvar_context.clone(),
                         ),
                         unique_name: unique_name(),
@@ -450,7 +466,7 @@ impl MaybeQuantified for PolymorphicType {
     }
 }
 
-type PolarVariable = (VariableState, bool);
+type PolarVariable = (String, bool);
 
 fn coalesce_concrete_type(
     concrete_type: Rc<ConcreteType>,
@@ -505,10 +521,13 @@ fn coalesce_simple_type_(
 ) -> AstType {
     use SimpleType::*;
     match &*simple_type {
-        Concrete(c) => coalesce_concrete_type(c.clone(), recursive_variables, polarity, in_process),
+        Concrete(c) => {
+            coalesce_concrete_type(c.clone(), recursive_variables, polarity, in_process)
+        }
         Variable(state) => {
-            let polar_var = (state.borrow().clone(), polarity);
-            if in_process.contains(&polar_var) {
+            let polar_var = (state.borrow().unique_name.clone(), polarity);
+            let contains = in_process.contains(&polar_var);
+            if contains {
                 let name = recursive_variables
                     .borrow_mut()
                     .entry(polar_var)
@@ -559,16 +578,27 @@ pub fn typecheck(items: &Program) -> AstType {
         .into_iter()
         .map(|item| match item {
             Item::ItemLet(Nonrecursive, name, expr) => {
-                let simple_type = typecheck_expr(expr, &var_ctx);
-                let ptype = PolymorphicType(simple_type.clone());
+                let expr_type = typecheck_expr(expr, &var_ctx);
+                let ptype = PolymorphicType(expr_type.clone());
                 var_ctx.insert(name.clone(), Rc::new(ptype));
-                simple_type
+                expr_type
+            }
+            Item::ItemLet(Recursive, name, expr) => {
+                let name_type = SimpleType::fresh_var();
+                var_ctx.insert(name.clone(), name_type.clone());
+                let expr_type = typecheck_expr(expr, &var_ctx);
+                constrain(expr_type.clone(), name_type);
+
+                let ptype = PolymorphicType(expr_type.clone());
+                var_ctx.insert(name.clone(), Rc::new(ptype));
+                expr_type
             }
             _ => unimplemented!(),
         })
         .last()
         .unwrap();
-    coalesce_simple_type(last_type).simplify()
+    let x = coalesce_simple_type(last_type);
+    x.simplify()
 }
 
 mod test {
@@ -757,7 +787,6 @@ mod test {
             ),
         )
         "###);
-        // This is wrong
         insta::assert_debug_snapshot!(test("let id = |x| x let x = { id(2); id(\"3\"); id }"), @r###"
         Function(
             [
@@ -770,10 +799,103 @@ mod test {
             ),
         )
         "###);
-        // This is wrong
         insta::assert_debug_snapshot!(test("let id = |x| x let x = { id(2); id(\"3\") }"), @r###"
         Primitive(
             String,
+        )
+        "###);
+    }
+
+    #[test]
+    fn test_recursion() {
+        insta::assert_debug_snapshot!(test("let rec f = |x| f(x)"), @r###"
+        Function(
+            [
+                Bottom,
+            ],
+            Top,
+        )
+        "###);
+
+        insta::assert_debug_snapshot!(test("let rec f = |x| f(f(x))"), @r###"
+        Function(
+            [
+                TypeVariable(
+                    "a4",
+                ),
+            ],
+            TypeVariable(
+                "a4",
+            ),
+        )
+        "###);
+        insta::assert_debug_snapshot!(test("let rec produce = |arg| { head: produce(arg) }"), @r###"
+        Function(
+            [
+                Bottom,
+            ],
+            Record(
+                [
+                    (
+                        "head",
+                        Recursive(
+                            "a10",
+                            Record(
+                                [
+                                    (
+                                        "head",
+                                        TypeVariable(
+                                            "a10",
+                                        ),
+                                    ),
+                                ],
+                            ),
+                        ),
+                    ),
+                ],
+            ),
+        )
+        "###);
+    
+        insta::assert_debug_snapshot!(test("let rec f = |x| { left: x , right: f(x) }"), @r###"
+        Function(
+            [
+                TypeVariable(
+                    "a12",
+                ),
+            ],
+            Record(
+                [
+                    (
+                        "left",
+                        TypeVariable(
+                            "a12",
+                        ),
+                    ),
+                    (
+                        "right",
+                        Recursive(
+                            "a14",
+                            Record(
+                                [
+                                    (
+                                        "left",
+                                        TypeVariable(
+                                            "a12",
+                                        ),
+                                    ),
+                                    (
+                                        "right",
+                                        TypeVariable(
+                                            "a14",
+                                        ),
+                                    ),
+                                ],
+                            ),
+                        ),
+                    ),
+                ],
+            ),
         )
         "###);
     }
