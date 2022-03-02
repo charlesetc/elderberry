@@ -620,7 +620,7 @@ mod test {
             ],
         )
         "###);
-        insta::assert_debug_snapshot!(test("let f = |r| { r.hi; r.there; r; }"), @r###"
+        insta::assert_debug_snapshot!(test("let f = |r| { r.hi; r.there; r }"), @r###"
         Function(
             [
                 Intersection(
@@ -710,7 +710,7 @@ mod test {
 
     #[test]
     fn test_apply_to_object() {
-        insta::assert_debug_snapshot!(test("let f = |o| o.y let x = {let a = {x: 2, y:3}; let b =  {x:2, y:\"hi\", z:true}; f(a); f(b); }"), @r###"
+        insta::assert_debug_snapshot!(test("let f = |o| o.y let x = {let a = {x: 2, y:3}; let b =  {x:2, y:\"hi\", z:true}; f(a); f(b) }"), @r###"
         Primitive(
             String,
         )
@@ -758,7 +758,7 @@ mod test {
         )
         "###);
         // This is wrong
-        insta::assert_debug_snapshot!(test("let id = |x| x let x = { id(2); id(\"3\"); id; }"), @r###"
+        insta::assert_debug_snapshot!(test("let id = |x| x let x = { id(2); id(\"3\"); id }"), @r###"
         Function(
             [
                 TypeVariable(
@@ -771,7 +771,7 @@ mod test {
         )
         "###);
         // This is wrong
-        insta::assert_debug_snapshot!(test("let id = |x| x let x = { id(2); id(\"3\"); }"), @r###"
+        insta::assert_debug_snapshot!(test("let id = |x| x let x = { id(2); id(\"3\") }"), @r###"
         Primitive(
             String,
         )
