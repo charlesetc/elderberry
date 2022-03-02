@@ -526,8 +526,7 @@ fn coalesce_simple_type_(
         }
         Variable(state) => {
             let polar_var = (state.borrow().unique_name.clone(), polarity);
-            let contains = in_process.contains(&polar_var);
-            if contains {
+            if in_process.contains(&polar_var) {
                 let name = recursive_variables
                     .borrow_mut()
                     .entry(polar_var)

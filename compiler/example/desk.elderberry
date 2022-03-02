@@ -1,6 +1,6 @@
 /* let rec produce = |arg| { head: produce(arg) } */
 
-let rec f = |x| { left: x , right: f(x) }
+/* let rec f = |x| { left: x , right: f(x) } */
 
 /* let y = |f| |x| f(f(x)) */
 
@@ -8,7 +8,7 @@ let rec f = |x| { left: x , right: f(x) }
 
 /* let z = p.id(2) */
 
-/* let omega = |x| x(x) */
+let omega = |x| x(x)
 
 /* let id = |x| x */
 
