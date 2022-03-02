@@ -1,4 +1,23 @@
-let y = |f| |x| f(f(x))
+/* let y = |f| |x| f(f(x)) */
+
+/*
+let f = |x|
+	if true {
+		x
+	} else {
+		2
+	}
+
+let produce = |x| x
+
+let z = |arg|
+	{ head: arg , tail: produce(f(arg)) } */
+
+let p = { id: |x| x }
+
+let z = p.id(2)
+
+/* let omega = |x| x(x) */
 
 /* let id = |x| x */
 

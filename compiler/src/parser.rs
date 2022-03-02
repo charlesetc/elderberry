@@ -433,9 +433,17 @@ fn parse_statements(tokens: &mut &[TokenWithSpan]) -> Statements {
         }
         _ => {
             let expr = parse_expression(tokens);
-            expect_and_consume(tokens, Token::Semicolon);
-            let statements = parse_statements(tokens);
-            Statements::Sequence(Box::new(expr), Box::new(statements))
+            match tokens {
+                [(Token::CloseBrace, _), rest @ ..] => {
+                    *tokens = rest;
+                    Statements::Sequence(Box::new(expr), Box::new(Statements::Empty))
+                }
+                _ => {
+                    expect_and_consume(tokens, Token::Semicolon);
+                    let statements = parse_statements(tokens);
+                    Statements::Sequence(Box::new(expr), Box::new(statements))
+                }
+            }
         }
     }
 }

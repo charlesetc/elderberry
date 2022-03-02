@@ -1,7 +1,6 @@
 use crate::ast::*;
 use crate::types::{
-    new_double_ref, unique_name, AstType, ConcreteType, DoubleRef, MaybeQuantified, Primitive,
-    SimpleType, VariableState,
+    unique_name, AstType, ConcreteType, MaybeQuantified, Primitive, SimpleType, VariableState,
 };
 use im::HashMap as ImMap;
 use im::OrdSet as ImSet;
@@ -17,41 +16,40 @@ fn type_error(str: String) -> ! {
 
 type ConstraintCache = Rc<RefCell<MutSet<(Rc<SimpleType>, Rc<SimpleType>)>>>;
 
-trait Constraints {
-    fn new_lower_bound(&mut self, lower_bound: Rc<ConcreteType>, cache: ConstraintCache);
-    fn new_upper_bound(&mut self, upper_bound: Rc<ConcreteType>, cache: ConstraintCache);
+fn new_lower_bound(
+    state: Rc<RefCell<VariableState>>,
+    lower_bound: Rc<ConcreteType>,
+    cache: ConstraintCache,
+) {
+    let existing_lower_bound = state.borrow().lower_bound.clone();
+    state.borrow_mut().lower_bound = least_upper_bound_concrete(
+        existing_lower_bound,
+        lower_bound.clone(),
+        cache.clone(),
+    );
+    constrain_concrete_types(lower_bound, state.borrow().upper_bound.clone(), cache);
 }
-
-impl Constraints for VariableState {
-    fn new_lower_bound(&mut self, lower_bound: Rc<ConcreteType>, cache: ConstraintCache) {
-        self.lower_bound = least_upper_bound_concrete(
-            self.lower_bound.clone(),
-            lower_bound.clone(),
-            cache.clone(),
-        );
-        constrain_concrete_types(lower_bound, self.upper_bound.clone(), cache);
-    }
-    fn new_upper_bound(&mut self, upper_bound: Rc<ConcreteType>, cache: ConstraintCache) {
-        self.upper_bound = greatest_lower_bound_concrete(
-            self.upper_bound.clone(),
-            upper_bound.clone(),
-            cache.clone(),
-        );
-        constrain_concrete_types(self.lower_bound.clone(), upper_bound, cache);
-    }
+fn new_upper_bound(
+    state: Rc<RefCell<VariableState>>,
+    upper_bound: Rc<ConcreteType>,
+    cache: ConstraintCache,
+) {
+    let existing_upper_bound = state.borrow().upper_bound.clone();
+    state.borrow_mut().upper_bound = greatest_lower_bound_concrete(
+        existing_upper_bound,
+        upper_bound.clone(),
+        cache.clone(),
+    );
+    constrain_concrete_types(state.borrow().lower_bound.clone(), upper_bound, cache);
 }
 
 fn unify_and_replace(
-    a: DoubleRef<VariableState>,
-    b: DoubleRef<VariableState>,
+    a: Rc<RefCell<VariableState>>,
+    b: Rc<RefCell<VariableState>>,
     cache: ConstraintCache,
-) -> DoubleRef<VariableState> {
-    {
-        a.borrow_mut()
-            .new_lower_bound(b.borrow().lower_bound.clone(), cache.clone());
-        a.borrow_mut()
-            .new_upper_bound(b.borrow().upper_bound.clone(), cache);
-    };
+) -> Rc<RefCell<VariableState>> {
+    new_lower_bound(a.clone(), b.borrow().lower_bound.clone(), cache.clone());
+    new_upper_bound(a.clone(), b.borrow().upper_bound.clone(), cache);
     b.replace(a.borrow().clone());
     a
 }
@@ -171,11 +169,11 @@ fn greatest_lower_bound(
             Rc::new(Variable(unify_and_replace(a.clone(), b.clone(), cache)))
         }
         (Variable(v), Concrete(c)) => {
-            v.borrow_mut().new_upper_bound(c.clone(), cache);
+            new_upper_bound(v.clone(), c.clone(), cache);
             a
         }
         (Concrete(c), Variable(v)) => {
-            v.borrow_mut().new_upper_bound(c.clone(), cache);
+            new_upper_bound(v.clone(), c.clone(), cache);
             b
         }
     }
@@ -196,11 +194,11 @@ fn least_upper_bound(
             Rc::new(Variable(unify_and_replace(a.clone(), b.clone(), cache)))
         }
         (Variable(v), Concrete(c)) => {
-            v.borrow_mut().new_lower_bound(c.clone(), cache);
+            new_lower_bound(v.clone(), c.clone(), cache);
             a
         }
         (Concrete(c), Variable(v)) => {
-            v.borrow_mut().new_lower_bound(c.clone(), cache);
+            new_lower_bound(v.clone(), c.clone(), cache);
             b
         }
     }
@@ -242,10 +240,8 @@ fn constrain_concrete_types(
 
 fn constrain_(subtype: Rc<SimpleType>, supertype: Rc<SimpleType>, cache: ConstraintCache) {
     use SimpleType::*;
-    if cache
-        .borrow_mut()
-        .insert((subtype.clone(), supertype.clone()))
-    {
+
+    if cache.borrow_mut().insert((subtype.clone(), supertype.clone())) {
         match (&*subtype, &*supertype) {
             (Concrete(subtype_c), Concrete(supertype_c)) => {
                 constrain_concrete_types(subtype_c.clone(), supertype_c.clone(), cache)
@@ -253,23 +249,19 @@ fn constrain_(subtype: Rc<SimpleType>, supertype: Rc<SimpleType>, cache: Constra
             (Variable(state1), Variable(state2)) => {
                 unify_and_replace(state1.clone(), state2.clone(), cache);
             }
-            (Variable(variable_state), Concrete(supertype)) => {
-                variable_state
-                    .borrow_mut()
-                    .new_upper_bound(supertype.clone(), cache);
+            (Variable(v), Concrete(supertype)) => {
+                new_upper_bound(v.clone(), supertype.clone(), cache);
             }
-            (Concrete(subtype), Variable(variable_state)) => {
-                variable_state
-                    .borrow_mut()
-                    .new_lower_bound(subtype.clone(), cache);
+            (Concrete(subtype), Variable(v)) => {
+                new_lower_bound(v.clone(), subtype.clone(), cache);
             }
         }
     }
 }
 
 fn constrain(subtype: Rc<SimpleType>, supertype: Rc<SimpleType>) {
-    let constraint_cache = Rc::new(RefCell::new(MutSet::new()));
-    constrain_(subtype, supertype, constraint_cache)
+    let cache = Rc::new(RefCell::new(MutSet::new()));
+    constrain_(subtype, supertype, cache)
 }
 
 fn primitive_simple_type(p: Primitive) -> Rc<SimpleType> {
@@ -382,7 +374,7 @@ pub struct PolymorphicType(Rc<SimpleType>);
 
 fn freshen_concrete_type(
     c: Rc<ConcreteType>,
-    qvar_context: Rc<RefCell<MutMap<String, DoubleRef<VariableState>>>>,
+    qvar_context: Rc<RefCell<MutMap<String, Rc<RefCell<VariableState>>>>>,
 ) -> Rc<ConcreteType> {
     use ConcreteType::*;
     match &*c {
@@ -414,7 +406,7 @@ fn freshen_concrete_type(
 
 fn freshen_simple_type(
     simple_type: Rc<SimpleType>,
-    qvar_context: Rc<RefCell<MutMap<String, DoubleRef<VariableState>>>>,
+    qvar_context: Rc<RefCell<MutMap<String, Rc<RefCell<VariableState>>>>>,
 ) -> Rc<SimpleType> {
     use SimpleType::*;
     match &*simple_type.clone() {
@@ -427,7 +419,7 @@ fn freshen_simple_type(
             // Freshen the constraints as well - a bit wordy.
             let new_state = match new_state {
                 None => {
-                    let new_state = new_double_ref(VariableState {
+                    let new_state = Rc::new(RefCell::new(VariableState {
                         lower_bound: freshen_concrete_type(
                             state.borrow().lower_bound.clone(),
                             qvar_context.clone(),
@@ -437,7 +429,7 @@ fn freshen_simple_type(
                             qvar_context.clone(),
                         ),
                         unique_name: unique_name(),
-                    });
+                    }));
                     qvar_context
                         .borrow_mut()
                         .insert(existing_name, new_state.clone());
@@ -538,7 +530,7 @@ fn coalesce_simple_type_(
                 );
                 let this_var = AstType::TypeVariable(state.borrow().unique_name.clone());
                 let ast_type =
-                    if polarity && ast_type == AstType::Bottom || ast_type == AstType::Top{
+                    if polarity && ast_type == AstType::Bottom || ast_type == AstType::Top {
                         this_var
                     } else {
                         if polarity {

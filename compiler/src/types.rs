@@ -32,11 +32,6 @@ pub struct VariableState {
     pub unique_name: VarName,
 }
 
-pub type DoubleRef<T> = Rc<RefCell<T>>;
-
-pub fn new_double_ref<T>(t: T) -> DoubleRef<T> {
-    Rc::new(RefCell::new(t))
-}
 
 // We have two refcells here so we can "unify" vars by replacing one
 // This way future edits to the VariableState affect all occurrences of the variable.
@@ -44,7 +39,7 @@ pub fn new_double_ref<T>(t: T) -> DoubleRef<T> {
 // 'global' hashmap of "variable state". Either way, we needed another layer of indirection.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SimpleType {
-    Variable(DoubleRef<VariableState>),
+    Variable(Rc<RefCell<VariableState>>),
     Concrete(Rc<ConcreteType>),
 }
 
@@ -205,7 +200,7 @@ impl VariableState {
 
 impl SimpleType {
     pub fn fresh_var() -> Rc<Self> {
-        let state = new_double_ref(VariableState::new());
+        let state = Rc::new(RefCell::new(VariableState::new()));
         Rc::new(SimpleType::Variable(state))
     }
 }
