@@ -517,7 +517,6 @@ fn coalesce_simple_type_(
         Variable(state) => {
             let polar_var = (state.borrow().clone(), polarity);
             if in_process.contains(&polar_var) {
-                // TODO: I think this should be a new state?
                 let name = recursive_variables
                     .borrow_mut()
                     .entry(polar_var)
@@ -539,13 +538,13 @@ fn coalesce_simple_type_(
                 );
                 let this_var = AstType::TypeVariable(state.borrow().unique_name.clone());
                 let ast_type =
-                    if polarity && ast_type == AstType::Top || ast_type == AstType::Bottom {
+                    if polarity && ast_type == AstType::Bottom || ast_type == AstType::Top{
                         this_var
                     } else {
                         if polarity {
                             AstType::Union(Rc::new(this_var), Rc::new(ast_type))
                         } else {
-                            AstType::Union(Rc::new(this_var), Rc::new(ast_type))
+                            AstType::Intersection(Rc::new(this_var), Rc::new(ast_type))
                         }
                     };
                 match recursive_variables.borrow().get(&polar_var) {
@@ -633,28 +632,18 @@ mod test {
         Function(
             [
                 Intersection(
-                    Intersection(
-                        TypeVariable(
-                            "a0",
-                        ),
-                        Record(
-                            [
-                                (
-                                    "hi",
-                                    TypeVariable(
-                                        "a1",
-                                    ),
-                                ),
-                            ],
-                        ),
+                    TypeVariable(
+                        "a0",
                     ),
                     Record(
                         [
                             (
+                                "hi",
+                                Bottom,
+                            ),
+                            (
                                 "there",
-                                TypeVariable(
-                                    "a2",
-                                ),
+                                Bottom,
                             ),
                         ],
                     ),
@@ -672,19 +661,14 @@ mod test {
         insta::assert_debug_snapshot!(test("let x = |y| |x| y(x)"), @r###"
         Function(
             [
-                Intersection(
-                    TypeVariable(
-                        "a0",
-                    ),
-                    Function(
-                        [
-                            TypeVariable(
-                                "a1",
-                            ),
-                        ],
+                Function(
+                    [
                         TypeVariable(
-                            "a2",
+                            "a1",
                         ),
+                    ],
+                    TypeVariable(
+                        "a2",
                     ),
                 ),
             ],
@@ -707,31 +691,14 @@ mod test {
         insta::assert_debug_snapshot!(test("let x = |f| |x| f(f(x))"), @r###"
         Function(
             [
-                Intersection(
-                    Intersection(
+                Function(
+                    [
                         TypeVariable(
-                            "a0",
+                            "a1",
                         ),
-                        Function(
-                            [
-                                TypeVariable(
-                                    "a1",
-                                ),
-                            ],
-                            TypeVariable(
-                                "a3",
-                            ),
-                        ),
-                    ),
-                    Function(
-                        [
-                            TypeVariable(
-                                "a3",
-                            ),
-                        ],
-                        TypeVariable(
-                            "a2",
-                        ),
+                    ],
+                    TypeVariable(
+                        "a1",
                     ),
                 ),
             ],
@@ -742,7 +709,7 @@ mod test {
                     ),
                 ],
                 TypeVariable(
-                    "a2",
+                    "a1",
                 ),
             ),
         )
@@ -751,46 +718,26 @@ mod test {
 
     #[test]
     fn test_apply_to_object() {
-        insta::assert_debug_snapshot!(test("let x = {let a = {x: 2, y:3}; let b =  {x:2, y:\"hi\", z:true}; let f = |o| o.x; f(a); f(b); }"), @r###"
-        Union(
-            TypeVariable(
-                "a3",
-            ),
-            Primitive(
-                Int,
-            ),
+        insta::assert_debug_snapshot!(test("let f = |o| o.y let x = {let a = {x: 2, y:3}; let b =  {x:2, y:\"hi\", z:true}; f(a); f(b); }"), @r###"
+        Primitive(
+            String,
         )
         "###);
     }
 
     #[test]
     fn test_if_statement() {
-        insta::assert_debug_snapshot!(test("let x = if true 2 else \"hi\" "), @r###"
-        Union(
-            Union(
-                TypeVariable(
-                    "a0",
-                ),
-                Primitive(
-                    Int,
-                ),
-            ),
-            Primitive(
-                String,
-            ),
+        insta::assert_debug_snapshot!(test("let x = if true 2 else 3 "), @r###"
+        Primitive(
+            Int,
         )
         "###);
         insta::assert_debug_snapshot!(test("let x = |x| if x x else x"), @r###"
         Function(
             [
                 Intersection(
-                    Intersection(
-                        TypeVariable(
-                            "a1",
-                        ),
-                        TypeVariable(
-                            "a2",
-                        ),
+                    TypeVariable(
+                        "a1",
                     ),
                     Primitive(
                         Bool,
@@ -798,7 +745,7 @@ mod test {
                 ),
             ],
             TypeVariable(
-                "a2",
+                "a1",
             ),
         )
         "###)
@@ -833,13 +780,8 @@ mod test {
         "###);
         // This is wrong
         insta::assert_debug_snapshot!(test("let id = |x| x let x = { id(2); id(\"3\"); }"), @r###"
-        Union(
-            TypeVariable(
-                "a10",
-            ),
-            Primitive(
-                String,
-            ),
+        Primitive(
+            String,
         )
         "###);
     }

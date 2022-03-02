@@ -1,6 +1,8 @@
-let id = |x| x
+let y = |f| |x| f(f(x))
 
-let x = id(2)
+/* let id = |x| x */
+
+/* let x = id(2) */
 
 /* let y = Yo
 

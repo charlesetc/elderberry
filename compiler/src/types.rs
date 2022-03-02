@@ -2,7 +2,6 @@ use im::HashMap as ImMap;
 use im::OrdSet as ImSet;
 use std::cell::RefCell;
 use std::collections::BTreeSet as MutSet;
-use std::ops::Add;
 use std::rc::Rc;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -65,12 +64,13 @@ pub enum AstType {
 impl AstType {
     pub fn simplify(self) -> AstType {
         let polar_vars = self.polar_vars();
-        self.drop_vars(&polar_vars)
+        let polarity = true;
+        self.drop_vars(&polar_vars, polarity)
     }
 
     fn polar_vars(&self) -> ImSet<VarName> {
-        let mut positive = Rc::new(RefCell::new(MutSet::new()));
-        let mut negative = Rc::new(RefCell::new(MutSet::new()));
+        let positive = Rc::new(RefCell::new(MutSet::new()));
+        let negative = Rc::new(RefCell::new(MutSet::new()));
 
         fn walk_polar_vars(
             ast_type: &AstType,
@@ -114,54 +114,58 @@ impl AstType {
         polar_vars.clone()
     }
 
-    fn drop_vars(&self, polar_vars: &ImSet<VarName>) -> AstType {
+    fn drop_vars(&self, polar_vars: &ImSet<VarName>, polarity : bool) -> AstType {
         use AstType::*;
         match self {
             Top | Bottom | Primitive(_) => self.clone(),
             Function(args, ret) => Function(
-                args.iter().map(|arg| arg.drop_vars(polar_vars)).collect(),
-                Rc::new(ret.drop_vars(polar_vars)),
+                args.iter().map(|arg| arg.drop_vars(polar_vars, !polarity)).collect(),
+                Rc::new(ret.drop_vars(polar_vars, polarity)),
             ),
             Record(fields) => Record(
                 fields
                     .iter()
-                    .map(|(name, arg)| (name.clone(), arg.drop_vars(polar_vars)))
+                    .map(|(name, arg)| (name.clone(), arg.drop_vars(polar_vars, polarity)))
                     .collect(),
             ),
             Recursive(var, ast_type) => {
-                Recursive(var.clone(), Rc::new(ast_type.drop_vars(polar_vars)))
+                Recursive(var.clone(), Rc::new(ast_type.drop_vars(polar_vars, polarity)))
             }
             TypeVariable(name) => {
-                assert!(
-                    !polar_vars.contains(name),
-                    "bug: if this happens, we need to re-think how to drop vars."
-                );
-                TypeVariable(name.clone())
+                if polar_vars.contains(name) {
+                    if polarity {
+                        Top
+                    } else {
+                        Bottom
+                    }
+                } else {
+                    TypeVariable(name.clone())
+                }
             }
             Union(a, b) => match (&**a, &**b) {
                 (TypeVariable(a_name), TypeVariable(b_name))
                     if polar_vars.contains(a_name) && polar_vars.contains(b_name) =>
                 {
-                    unimplemented!("bug: if this happens we need to re-think how to drop vars.")
+                    unimplemented!("bug (u): if this happens we need to re-think how to drop vars.")
                 }
-                (TypeVariable(name), _) if polar_vars.contains(name) => b.drop_vars(polar_vars),
-                (_, TypeVariable(name)) if polar_vars.contains(name) => a.drop_vars(polar_vars),
+                (TypeVariable(name), _) if polar_vars.contains(name) => b.drop_vars(polar_vars, polarity),
+                (_, TypeVariable(name)) if polar_vars.contains(name) => a.drop_vars(polar_vars, polarity),
                 (_, _) => Union(
-                    Rc::new(a.drop_vars(polar_vars)),
-                    Rc::new(b.drop_vars(polar_vars)),
+                    Rc::new(a.drop_vars(polar_vars, polarity)),
+                    Rc::new(b.drop_vars(polar_vars, polarity)),
                 ),
             },
             Intersection(a, b) => match (&**a, &**b) {
                 (TypeVariable(a_name), TypeVariable(b_name))
                     if polar_vars.contains(a_name) && polar_vars.contains(b_name) =>
                 {
-                    unimplemented!("bug: if this happens we need to re-think how to drop vars.")
+                    unimplemented!("bug (i): if this happens we need to re-think how to drop vars.")
                 }
-                (TypeVariable(name), _) if polar_vars.contains(name) => b.drop_vars(polar_vars),
-                (_, TypeVariable(name)) if polar_vars.contains(name) => a.drop_vars(polar_vars),
+                (TypeVariable(name), _) if polar_vars.contains(name) => b.drop_vars(polar_vars, polarity),
+                (_, TypeVariable(name)) if polar_vars.contains(name) => a.drop_vars(polar_vars, polarity),
                 (_, _) => Intersection(
-                    Rc::new(a.drop_vars(polar_vars)),
-                    Rc::new(b.drop_vars(polar_vars)),
+                    Rc::new(a.drop_vars(polar_vars, polarity)),
+                    Rc::new(b.drop_vars(polar_vars, polarity)),
                 ),
             },
         }
