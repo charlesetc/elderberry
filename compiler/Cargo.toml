@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 im = "15.0.0"
+by_address = "1.0.4"
 logos = "*"
 logos-derive = "*"
 # expect-test = "*"

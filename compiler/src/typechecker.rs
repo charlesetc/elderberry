@@ -4,6 +4,7 @@ use crate::types::{
 };
 use im::OrdMap as ImMap;
 use im::OrdSet as ImSet;
+use by_address::ByAddress;
 use std::cell::RefCell;
 use std::collections::BTreeMap as MutMap;
 use std::collections::BTreeSet as MutSet;
@@ -22,11 +23,8 @@ fn new_lower_bound(
     cache: ConstraintCache,
 ) {
     let existing_lower_bound = state.borrow().lower_bound.clone();
-    let new_lower_bound = least_upper_bound_concrete(
-        existing_lower_bound,
-        lower_bound.clone(),
-        cache.clone(),
-    );
+    let new_lower_bound =
+        least_upper_bound_concrete(existing_lower_bound, lower_bound.clone(), cache.clone());
     state.borrow_mut().lower_bound = new_lower_bound;
     let upper_bound = state.borrow().upper_bound.clone();
     constrain_concrete_types(lower_bound, upper_bound, cache);
@@ -37,11 +35,8 @@ fn new_upper_bound(
     cache: ConstraintCache,
 ) {
     let existing_upper_bound = state.borrow().upper_bound.clone();
-    let new_upper_bound = greatest_lower_bound_concrete(
-        existing_upper_bound,
-        upper_bound.clone(),
-        cache.clone(),
-    );
+    let new_upper_bound =
+        greatest_lower_bound_concrete(existing_upper_bound, upper_bound.clone(), cache.clone());
     {
         state.borrow_mut().upper_bound = new_upper_bound;
     }
@@ -249,7 +244,10 @@ fn constrain_concrete_types(
 
 fn constrain_(subtype: Rc<SimpleType>, supertype: Rc<SimpleType>, cache: ConstraintCache) {
     use SimpleType::*;
-    if cache.borrow_mut().insert((subtype.clone(), supertype.clone())) {
+    if cache
+        .borrow_mut()
+        .insert((subtype.clone(), supertype.clone()))
+    {
         match (&*subtype, &*supertype) {
             (Concrete(subtype_c), Concrete(supertype_c)) => {
                 constrain_concrete_types(subtype_c.clone(), supertype_c.clone(), cache)
@@ -466,13 +464,16 @@ impl MaybeQuantified for PolymorphicType {
     }
 }
 
+
 type PolarVariable = (String, bool);
 
-fn coalesce_concrete_type(
+fn coalesce_concrete_type_after_recursion_check(
     concrete_type: Rc<ConcreteType>,
-    recursive_variables: Rc<RefCell<MutMap<PolarVariable, String>>>,
+    recursive_variables_vars: Rc<RefCell<MutMap<PolarVariable, String>>>,
+    recursive_variables_types: Rc<RefCell<MutMap<ByAddress<Rc<ConcreteType>>, String>>>,
+    in_process_vars: ImSet<PolarVariable>,
+    in_process_types: ImSet<ByAddress<Rc<ConcreteType>>>,
     polarity: bool,
-    in_process: ImSet<PolarVariable>,
 ) -> AstType {
     match &*concrete_type {
         ConcreteType::Top => AstType::Top,
@@ -484,13 +485,22 @@ fn coalesce_concrete_type(
                 .map(|arg| {
                     coalesce_simple_type_(
                         arg.clone(),
-                        recursive_variables.clone(),
+                        recursive_variables_vars.clone(),
+                        recursive_variables_types.clone(),
+                        in_process_vars.clone(),
+                        in_process_types.clone(),
                         !polarity,
-                        in_process.clone(),
                     )
                 })
                 .collect::<Vec<_>>();
-            let ret = coalesce_simple_type_(ret.clone(), recursive_variables, polarity, in_process);
+            let ret = coalesce_simple_type_(
+                ret.clone(),
+                recursive_variables_vars,
+                recursive_variables_types,
+                in_process_vars,
+                in_process_types,
+                polarity,
+            );
             AstType::Function(args, Rc::new(ret))
         }
         ConcreteType::Record(fields) => {
@@ -501,9 +511,11 @@ fn coalesce_concrete_type(
                         name.clone(),
                         coalesce_simple_type_(
                             field_type.clone(),
-                            recursive_variables.clone(),
+                            recursive_variables_vars.clone(),
+                            recursive_variables_types.clone(),
+                            in_process_vars.clone(),
+                            in_process_types.clone(),
                             polarity,
-                            in_process.clone(),
                         ),
                     )
                 })
@@ -513,28 +525,68 @@ fn coalesce_concrete_type(
     }
 }
 
+fn coalesce_concrete_type(
+    concrete_type: Rc<ConcreteType>,
+    recursive_variables_vars: Rc<RefCell<MutMap<PolarVariable, String>>>,
+    recursive_variables_types: Rc<RefCell<MutMap<ByAddress<Rc<ConcreteType>>, String>>>,
+    in_process_vars: ImSet<PolarVariable>,
+    in_process_types: ImSet<ByAddress<Rc<ConcreteType>>>,
+    polarity: bool,
+) -> AstType {
+    // This might be a point of optimization in the future
+    if in_process_types.contains(&ByAddress(concrete_type.clone())) {
+        let name = recursive_variables_types
+            .borrow_mut()
+            .entry(concrete_type.into())
+            .or_insert_with(|| unique_name())
+            .clone();
+        AstType::TypeVariable(name)
+    } else {
+        let in_process_types = in_process_types.update(ByAddress(concrete_type.clone()));
+        let ast_type = coalesce_concrete_type_after_recursion_check(
+            concrete_type.clone(),
+            recursive_variables_vars,
+            recursive_variables_types.clone(),
+            in_process_vars,
+            in_process_types,
+            polarity,
+        );
+        match recursive_variables_types.borrow().get(&concrete_type.into()) {
+            Some(name) => AstType::Recursive(name.clone(), Rc::new(ast_type)),
+            None => ast_type,
+        }
+    }
+}
+
 fn coalesce_simple_type_(
     simple_type: Rc<SimpleType>,
-    recursive_variables: Rc<RefCell<MutMap<PolarVariable, String>>>,
+    recursive_variables_vars: Rc<RefCell<MutMap<PolarVariable, String>>>,
+    recursive_variables_types: Rc<RefCell<MutMap<ByAddress<Rc<ConcreteType>>, String>>>,
+    in_process_vars: ImSet<PolarVariable>,
+    in_process_types: ImSet<ByAddress<Rc<ConcreteType>>>,
     polarity: bool,
-    in_process: ImSet<PolarVariable>,
 ) -> AstType {
     use SimpleType::*;
     match &*simple_type {
-        Concrete(c) => {
-            coalesce_concrete_type(c.clone(), recursive_variables, polarity, in_process)
-        }
+        Concrete(c) => coalesce_concrete_type(
+            c.clone(),
+            recursive_variables_vars,
+            recursive_variables_types,
+            in_process_vars,
+            in_process_types,
+            polarity,
+        ),
         Variable(state) => {
             let polar_var = (state.borrow().unique_name.clone(), polarity);
-            if in_process.contains(&polar_var) {
-                let name = recursive_variables
+            if in_process_vars.contains(&polar_var) {
+                let name = recursive_variables_vars
                     .borrow_mut()
                     .entry(polar_var)
                     .or_insert_with(|| unique_name())
                     .clone();
                 AstType::TypeVariable(name)
             } else {
-                let in_process = in_process.update(polar_var.clone());
+                let in_process = in_process_vars.update(polar_var.clone());
                 let bounded_type = if polarity {
                     state.borrow().lower_bound.clone()
                 } else {
@@ -542,9 +594,11 @@ fn coalesce_simple_type_(
                 };
                 let ast_type = coalesce_concrete_type(
                     bounded_type,
-                    recursive_variables.clone(),
-                    polarity,
+                    recursive_variables_vars.clone(),
+                    recursive_variables_types.clone(),
                     in_process,
+                    in_process_types,
+                    polarity,
                 );
                 let this_var = AstType::TypeVariable(state.borrow().unique_name.clone());
                 let ast_type =
@@ -557,7 +611,7 @@ fn coalesce_simple_type_(
                             AstType::Intersection(Rc::new(this_var), Rc::new(ast_type))
                         }
                     };
-                match recursive_variables.borrow().get(&polar_var) {
+                match recursive_variables_vars.borrow().get(&polar_var) {
                     Some(name) => AstType::Recursive(name.clone(), Rc::new(ast_type)),
                     None => ast_type,
                 }
@@ -567,8 +621,14 @@ fn coalesce_simple_type_(
 }
 
 fn coalesce_simple_type(simple_type: Rc<SimpleType>) -> AstType {
-    let recursive_variables = Rc::new(RefCell::new(MutMap::new()));
-    coalesce_simple_type_(simple_type, recursive_variables, true, ImSet::new())
+    coalesce_simple_type_(
+        simple_type,
+        Rc::new(RefCell::new(MutMap::new())),
+        Rc::new(RefCell::new(MutMap::new())),
+        ImSet::new(),
+        ImSet::new(),
+        true,
+    )
 }
 
 pub fn typecheck(items: &Program) -> AstType {
@@ -833,29 +893,22 @@ mod test {
             [
                 Bottom,
             ],
-            Record(
-                [
-                    (
-                        "head",
-                        Recursive(
-                            "a10",
-                            Record(
-                                [
-                                    (
-                                        "head",
-                                        TypeVariable(
-                                            "a10",
-                                        ),
-                                    ),
-                                ],
+            Recursive(
+                "a10",
+                Record(
+                    [
+                        (
+                            "head",
+                            TypeVariable(
+                                "a10",
                             ),
                         ),
-                    ),
-                ],
+                    ],
+                ),
             ),
         )
         "###);
-    
+
         insta::assert_debug_snapshot!(test("let rec f = |x| { left: x , right: f(x) }"), @r###"
         Function(
             [
@@ -863,37 +916,24 @@ mod test {
                     "a12",
                 ),
             ],
-            Record(
-                [
-                    (
-                        "left",
-                        TypeVariable(
-                            "a12",
-                        ),
-                    ),
-                    (
-                        "right",
-                        Recursive(
-                            "a14",
-                            Record(
-                                [
-                                    (
-                                        "left",
-                                        TypeVariable(
-                                            "a12",
-                                        ),
-                                    ),
-                                    (
-                                        "right",
-                                        TypeVariable(
-                                            "a14",
-                                        ),
-                                    ),
-                                ],
+            Recursive(
+                "a14",
+                Record(
+                    [
+                        (
+                            "left",
+                            TypeVariable(
+                                "a12",
                             ),
                         ),
-                    ),
-                ],
+                        (
+                            "right",
+                            TypeVariable(
+                                "a14",
+                            ),
+                        ),
+                    ],
+                ),
             ),
         )
         "###);

@@ -8,7 +8,9 @@
 
 /* let z = p.id(2) */
 
-let omega = |x| x(x)
+/* let omega = |x| x(x) */
+
+let rec produce = |arg| { head: produce(arg) }
 
 /* let id = |x| x */
 

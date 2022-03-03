@@ -24,6 +24,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "by_address"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e245704f60eb4eb45810d65cf14eb54d2eb50a6f3715fe2d7cd01ee905c2944f"
+
+[[package]]
 name = "console"
 version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -40,6 +46,7 @@ dependencies = [
 name = "elderberry-compiler"
 version = "0.1.0"
 dependencies = [
+ "by_address",
  "im",
  "insta",
  "logos",
