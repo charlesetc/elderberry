@@ -303,35 +303,61 @@ fn typecheck_statements(
     }
 }
 
-fn typecheck_expr(expr: &Expr, var_ctx: &ImMap<String, Rc<dyn MaybeQuantified>>) -> Rc<SimpleType> {
+fn typecheck_constant(constant: &Constant) -> Rc<SimpleType> {
     use crate::ast::Constant::*;
+    match constant {
+        Bool(_) => primitive_simple_type(Primitive::Bool),
+        Int(_) => primitive_simple_type(Primitive::Int),
+        String(_) => primitive_simple_type(Primitive::String),
+        Float(_) => primitive_simple_type(Primitive::Float),
+        Unit => primitive_simple_type(Primitive::Unit),
+    }
+}
+
+fn typecheck_pattern(pat: &Pattern, var_ctx: &ImMap<String, Rc<dyn MaybeQuantified>>) -> (Rc<SimpleType>, ImMap<String, Rc<dyn MaybeQuantified>>) {
+    use Pattern::*;
+    match pat {
+        Constant(c) => (typecheck_constant(c), var_ctx.clone()),
+        Variant(name, patterns) => unimplemented!(),
+        Record(fields) => {
+            let mut var_ctx = var_ctx.clone();
+            let fields = fields.iter().map(|(name, pattern)| {
+                let (pattern_type, var_ctx_) = typecheck_pattern(pattern, &var_ctx);
+                var_ctx = var_ctx_;
+                (name, pattern_type)
+            }).collect();
+            (Rc::new(SimpleType::Concrete(Rc::new(ConcreteType::Record(fields)))), var_ctx)
+        }
+        Var(name) => {
+            let var_type = SimpleType::fresh_var();
+            (var_type.clone(), var_ctx.update(name.clone(), var_type))
+        }
+        Wildcard => (SimpleType::fresh_var(), var_ctx.clone())
+    }
+}
+
+fn typecheck_expr(expr : &Expr, var_ctx: &ImMap<String, Rc<dyn MaybeQuantified>>) -> Rc<SimpleType> {
     use Expr::*;
     let simple_type = match expr {
-        Constant(Bool(_)) => primitive_simple_type(Primitive::Bool),
-        Constant(Int(_)) => primitive_simple_type(Primitive::Int),
-        Constant(String(_)) => primitive_simple_type(Primitive::String),
-        Constant(Float(_)) => primitive_simple_type(Primitive::Float),
-        Constant(Unit) => primitive_simple_type(Primitive::Unit),
+        Constant(c) => typecheck_constant(c),
         Var(name) => match var_ctx.get(name) {
             Some(maybe_quantified) => maybe_quantified.clone().instantiate(),
             None => type_error(format!("variable \"{}\" not found", name)),
         },
         Lambda(args, expr) => {
-            match args.first() {
-                Some(Pattern::Var(name)) => {
-                    let param = SimpleType::fresh_var();
-                    let var_ctx = var_ctx.update(name.clone(), param.clone());
-                    Rc::new(SimpleType::Concrete(Rc::new(ConcreteType::Function(
-                        vec![param],
-                        typecheck_expr(expr, &var_ctx),
-                    ))))
-                }
-                _ =>
-                // TODO: This should be able to typecheck all the patterns
-                {
-                    unimplemented!()
-                }
-            }
+            let (arg_types, var_ctx) = {
+                let mut arg_types = vec![];
+                let var_ctx = args.iter().fold(var_ctx.clone(), |var_ctx, arg| {
+                    let (arg_type, var_ctx) = typecheck_pattern(arg, &var_ctx);
+                    arg_types.push(arg_type);
+                    var_ctx
+                });
+                (arg_types, var_ctx)
+            };
+            Rc::new(SimpleType::Concrete(Rc::new(ConcreteType::Function(
+                arg_types,
+                typecheck_expr(expr, &var_ctx),
+            ))))
         }
         Apply(f, args) => {
             let return_type = SimpleType::fresh_var();
@@ -367,17 +393,27 @@ fn typecheck_expr(expr: &Expr, var_ctx: &ImMap<String, Rc<dyn MaybeQuantified>>)
             let condition_type = typecheck_expr(condition, &var_ctx);
             constrain(condition_type, primitive_simple_type(Primitive::Bool));
             let return_type = SimpleType::fresh_var();
-            let true_type = typecheck_expr(true_branch, &var_ctx);
-            let false_type = match false_branch {
+            let true_branch_type = typecheck_expr(true_branch, &var_ctx);
+            let false_branch_type = match false_branch {
                 Some(false_branch) => typecheck_expr(false_branch, &var_ctx),
                 None => primitive_simple_type(Primitive::Unit),
             };
-            constrain(true_type, return_type.clone());
-            constrain(false_type, return_type.clone());
+            constrain(true_branch_type, return_type.clone());
+            constrain(false_branch_type, return_type.clone());
+            return_type
+        }
+        Match(expr, branches) => {
+            let return_type = SimpleType::fresh_var();
+            let expr_type = typecheck_expr(expr, var_ctx);
+            for (pattern, branch_expr) in branches.iter() {
+                let (pattern_type, var_ctx) = typecheck_pattern(pattern, var_ctx);
+                constrain(expr_type.clone(), pattern_type);
+                let branch_type = typecheck_expr(branch_expr, &var_ctx);
+                constrain(branch_type, return_type.clone());
+            }
             return_type
         }
         Variant(_, _) => unimplemented!(),
-        Match(_, _) => unimplemented!(),
     };
     simple_type
 }
@@ -765,6 +801,31 @@ mod test {
             ),
         )
         "###);
+        insta::assert_debug_snapshot!(test("let f = |y, x| y(x, x)"), @r###"
+        Function(
+            [
+                Function(
+                    [
+                        TypeVariable(
+                            "a4",
+                        ),
+                        TypeVariable(
+                            "a4",
+                        ),
+                    ],
+                    TypeVariable(
+                        "a5",
+                    ),
+                ),
+                TypeVariable(
+                    "a4",
+                ),
+            ],
+            TypeVariable(
+                "a5",
+            ),
+        )
+        "###);
     }
 
     #[test]
@@ -937,5 +998,65 @@ mod test {
             ),
         )
         "###);
+    }
+
+    #[test]
+    fn test_match() {
+        insta::assert_debug_snapshot!(test("let f = |x| match x { a -> a }"), @r###"
+        Function(
+            [
+                TypeVariable(
+                    "a0",
+                ),
+            ],
+            TypeVariable(
+                "a0",
+            ),
+        )
+        "###);
+        // This seems wrong
+        insta::assert_debug_snapshot!(test("let f = |x| match x { { name: a } -> { wow: a }, { this: a } -> { foo: a }}"), @r###"
+        Function(
+            [
+                Record(
+                    [
+                        (
+                            "name",
+                            TypeVariable(
+                                "a5",
+                            ),
+                        ),
+                        (
+                            "this",
+                            TypeVariable(
+                                "a6",
+                            ),
+                        ),
+                    ],
+                ),
+            ],
+            Record(
+                [
+                    (
+                        "foo",
+                        TypeVariable(
+                            "a6",
+                        ),
+                    ),
+                    (
+                        "wow",
+                        TypeVariable(
+                            "a5",
+                        ),
+                    ),
+                ],
+            ),
+        )
+        "###);
+        insta::assert_debug_snapshot!(test("let f = |x| match x { { name: a } -> { wow: a }, { this: a } -> { foo: a }} let a = f({name: 2, this: 3}).foo"), @r###"
+        Primitive(
+            Int,
+        )
+        "###)
     }
 }

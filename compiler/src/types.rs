@@ -146,7 +146,7 @@ impl AstType {
                 (TypeVariable(a_name), TypeVariable(b_name))
                     if polar_vars.contains(a_name) && polar_vars.contains(b_name) =>
                 {
-                    unimplemented!("bug (u): if this happens we need to re-think how to drop vars.")
+                    unreachable!("bug (u): if this happens we need to re-think how to drop vars.")
                 }
                 (TypeVariable(name), _) if polar_vars.contains(name) => {
                     b.drop_vars(polar_vars, polarity)
@@ -163,7 +163,7 @@ impl AstType {
                 (TypeVariable(a_name), TypeVariable(b_name))
                     if polar_vars.contains(a_name) && polar_vars.contains(b_name) =>
                 {
-                    unimplemented!("bug (i): if this happens we need to re-think how to drop vars.")
+                    unreachable!("bug (i): if this happens we need to re-think how to drop vars.")
                 }
                 (TypeVariable(name), _) if polar_vars.contains(name) => {
                     b.drop_vars(polar_vars, polarity)
