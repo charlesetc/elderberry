@@ -1001,6 +1001,28 @@ mod test {
     }
 
     #[test]
+    fn test_if_record() {
+        insta::assert_debug_snapshot!(test("let z = if true { wow: 2 } else { that: 2 } "), @r###"
+        Record(
+            [
+                (
+                    "that",
+                    Primitive(
+                        Int,
+                    ),
+                ),
+                (
+                    "wow",
+                    Primitive(
+                        Int,
+                    ),
+                ),
+            ],
+        )
+        "###);
+    }
+
+    #[test]
     fn test_match() {
         insta::assert_debug_snapshot!(test("let f = |x| match x { a -> a }"), @r###"
         Function(
