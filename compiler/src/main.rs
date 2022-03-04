@@ -1,12 +1,33 @@
 use std::env;
 use std::fs;
+use clap::Parser;
+
+#[derive(Parser)]
+#[clap(author, version, about, long_about = None)]
+enum Cli {
+    Typecheck {
+        filename : String
+    },
+    Compile {
+        filename : String
+    }
+}
 
 fn main() {
-    let args = env::args().collect::<Vec<String>>();
-    let filename = &args[1];
-    let contents = fs::read_to_string(filename).expect("unable to read file");
-    let ast = elderberry_compiler::parse(&contents);
-    let typed_ast = elderberry_compiler::typecheck(&ast);
-    // let js = elderberry_compiler::generate(ast);
-    println!("Typed ast: {:?}", typed_ast);
+    let cli = Cli::parse();
+    match &cli {
+        Cli::Compile { filename } => {
+            let contents = fs::read_to_string(filename).expect("unable to read file");
+            let ast = elderberry_compiler::parse(&contents);
+            let typed_ast = elderberry_compiler::typecheck(&ast);
+            let js = elderberry_compiler::generate(ast);
+            println!("{}", js);
+        }
+        Cli::Typecheck { filename } => {
+            let contents = fs::read_to_string(filename).expect("unable to read file");
+            let ast = elderberry_compiler::parse(&contents);
+            let typed_ast = elderberry_compiler::typecheck(&ast);
+            println!("Typed ast: {:?}", typed_ast);
+        }
+    }
 }
