@@ -91,7 +91,7 @@ fn greatest_lower_bound_concrete(
                         (None, None) => panic!("at least one of these should have each key"),
                         (None, Some(value)) | (Some(value), None) => value.clone(),
                         (Some(a_value), Some(b_value)) => {
-                            greatest_lower_bound(a_value.clone(), b_value.clone(), cache.clone())
+                            least_upper_bound(a_value.clone(), b_value.clone(), cache.clone())
                         }
                     };
                     (key.clone(), value)
@@ -138,15 +138,14 @@ fn least_upper_bound_concrete(
             let all_keys: ImSet<String> = a_fields.keys().chain(b_fields.keys()).collect();
             let fields = all_keys
                 .iter()
-                .map(|key| {
-                    let value = match (a_fields.get(key), b_fields.get(key)) {
+                .filter_map(|key| {
+                    match (a_fields.get(key), b_fields.get(key)) {
                         (None, None) => panic!("at least one of these should have each key"),
-                        (None, Some(value)) | (Some(value), None) => value.clone(),
+                        (None, Some(_)) | (Some(_), None) => None,
                         (Some(a_value), Some(b_value)) => {
-                            least_upper_bound(a_value.clone(), b_value.clone(), cache.clone())
+                            Some((key.clone(), greatest_lower_bound(a_value.clone(), b_value.clone(), cache.clone())))
                         }
-                    };
-                    (key.clone(), value)
+                    }
                 })
                 .collect();
             Rc::new(Record(fields))
@@ -318,7 +317,7 @@ fn typecheck_pattern(pat: &Pattern, var_ctx: &ImMap<String, Rc<dyn MaybeQuantifi
     use Pattern::*;
     match pat {
         Constant(c) => (typecheck_constant(c), var_ctx.clone()),
-        Variant(name, patterns) => unimplemented!(),
+        Variant(_name, _patterns) => unimplemented!(),
         Record(fields) => {
             let mut var_ctx = var_ctx.clone();
             let fields = fields.iter().map(|(name, pattern)| {
@@ -1004,20 +1003,7 @@ mod test {
     fn test_if_record() {
         insta::assert_debug_snapshot!(test("let z = if true { wow: 2 } else { that: 2 } "), @r###"
         Record(
-            [
-                (
-                    "that",
-                    Primitive(
-                        Int,
-                    ),
-                ),
-                (
-                    "wow",
-                    Primitive(
-                        Int,
-                    ),
-                ),
-            ],
+            [],
         )
         "###);
     }
@@ -1036,8 +1022,7 @@ mod test {
             ),
         )
         "###);
-        // This seems wrong
-        insta::assert_debug_snapshot!(test("let f = |x| match x { { name: a } -> { wow: a }, { this: a } -> { foo: a }}"), @r###"
+        insta::assert_debug_snapshot!(test("let f = |a| match a { { name: a } -> { wow: a, pool: 2 }, { this: 3 } -> { foo: a, pool: a.name }}"), @r###"
         Function(
             [
                 Record(
@@ -1050,8 +1035,8 @@ mod test {
                         ),
                         (
                             "this",
-                            TypeVariable(
-                                "a6",
+                            Primitive(
+                                Int,
                             ),
                         ),
                     ],
@@ -1060,13 +1045,7 @@ mod test {
             Record(
                 [
                     (
-                        "foo",
-                        TypeVariable(
-                            "a6",
-                        ),
-                    ),
-                    (
-                        "wow",
+                        "pool",
                         TypeVariable(
                             "a5",
                         ),
@@ -1075,7 +1054,7 @@ mod test {
             ),
         )
         "###);
-        insta::assert_debug_snapshot!(test("let f = |x| match x { { name: a } -> { wow: a }, { this: a } -> { foo: a }} let a = f({name: 2, this: 3}).foo"), @r###"
+        insta::assert_debug_snapshot!(test("let f = |x| match x { { name: a } -> { wow: a }, { this: a } -> { wow: a }} let a = f({name: 2, this: 3}).wow"), @r###"
         Primitive(
             Int,
         )

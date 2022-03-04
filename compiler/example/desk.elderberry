@@ -1,3 +1,6 @@
+
+let f = |x| match x { a -> {hi: 2}, b -> {there: 3} }
+
 /* let rec produce = |arg| { head: produce(arg) } */
 
 /* let rec f = |x| { left: x , right: f(x) } */
@@ -10,7 +13,7 @@
 
 /* let omega = |x| x(x) */
 
-let rec produce = |arg| { head: produce(arg) }
+/* let rec produce = |arg| { head: produce(arg) } */
 
 /* let id = |x| x */
 
