@@ -1,12 +1,25 @@
+
+let nil = None
+let cons = |x, l| Cons(x, l)
+
+let a = cons(2,cons(3,nil))
+
+let gen_5 =
+	if x < 0
+	then
+
 /* 
 let z = |x| if x { x } else { x }
 */
 
 /* let rec f = |x| f(f(x)) */
 
+
+/*
 let unwrap_default = |x| match x { Some(a) -> a, None -> 2 } 
 
 let z = unwrap_default(None)
+*/
 
 /* let rec produce = |arg| { head: produce(arg) } */
 

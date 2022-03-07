@@ -1,15 +1,11 @@
-use std::fs;
 use clap::Parser;
+use std::fs;
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
 enum Cli {
-    Typecheck {
-        filename : String
-    },
-    Compile {
-        filename : String
-    }
+    Typecheck { filename: String },
+    Compile { filename: String },
 }
 
 fn main() {

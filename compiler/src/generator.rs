@@ -28,7 +28,7 @@ fn escape(s: &String) -> String {
     ret
 }
 
-fn generate_let(out: &mut String, name : &str, expr: &Expr) {
+fn generate_let(out: &mut String, name: &str, expr: &Expr) {
     out.push_str("let ");
     out.push_str(name);
     out.push_str("=");

@@ -201,7 +201,10 @@ pub trait MaybeQuantified {
 }
 
 impl MaybeQuantified for SimpleType {
-    fn instantiate(self: Rc<Self>, _variable_states: Rc<RefCell<VariableStates>>) -> Rc<SimpleType> {
+    fn instantiate(
+        self: Rc<Self>,
+        _variable_states: Rc<RefCell<VariableStates>>,
+    ) -> Rc<SimpleType> {
         self
     }
 }
@@ -235,7 +238,7 @@ impl VariableState {
 #[derive(Debug)]
 enum VarLink<T> {
     Value(T),
-    Link(VarName)
+    Link(VarName),
 }
 
 // TODO: Make VarName a newtype here
@@ -243,18 +246,18 @@ enum VarLink<T> {
 pub struct VariableStates(MutMap<VarName, VarLink<VariableState>>);
 
 impl VariableStates {
-
     pub fn new() -> Self {
         VariableStates(MutMap::new())
     }
 
-    pub fn link_to(&mut self, link_from : &VarName, link_to : &VarName) {
+    pub fn link_to(&mut self, link_from: &VarName, link_to: &VarName) {
         let link_to = self.find(link_to);
         let link_from = self.find(link_from);
         if &link_from == &link_to {
-            return
+            return;
         }
-        self.0.insert(link_from.clone(), VarLink::Link(link_to.clone()));
+        self.0
+            .insert(link_from.clone(), VarLink::Link(link_to.clone()));
     }
 
     pub fn fresh_var_name(&mut self) -> String {
@@ -284,7 +287,11 @@ impl VariableStates {
         self.find_and_map(v, |state| state.upper_bound = value);
     }
 
-    fn find_with_references(&self, v: &VarName, references : MutSet<VarName>) -> (VarName, MutSet<VarName>) {
+    fn find_with_references(
+        &self,
+        v: &VarName,
+        references: MutSet<VarName>,
+    ) -> (VarName, MutSet<VarName>) {
         match &self.0[v] {
             VarLink::Value(_) => (v.clone(), references),
             VarLink::Link(to_) => {
@@ -303,15 +310,17 @@ impl VariableStates {
         found
     }
 
-    fn find_and_map<F>(&mut self, v: &VarName, f: F) where F : FnOnce(&mut VariableState) {
+    fn find_and_map<F>(&mut self, v: &VarName, f: F)
+    where
+        F: FnOnce(&mut VariableState),
+    {
         let found = self.find(v);
         match self.0.get_mut(&found) {
             Some(VarLink::Value(state)) => f(state),
-            _ => panic!("bug: we just found it!")
+            _ => panic!("bug: we just found it!"),
         }
     }
 }
-
 impl std::ops::Index<&str> for VariableStates {
     type Output = VariableState;
     fn index(&self, index: &str) -> &VariableState {
