@@ -15,6 +15,7 @@ pub enum Primitive {
 
 type VarName = String;
 type FieldName = String;
+type VariantName = String;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ConcreteType {
@@ -23,6 +24,7 @@ pub enum ConcreteType {
     Primitive(Primitive),
     Function(Vec<Rc<SimpleType>>, Rc<SimpleType>),
     Record(ImMap<FieldName, Rc<SimpleType>>),
+    Variant(ImMap<VariantName, Vec<Rc<SimpleType>>>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -47,6 +49,7 @@ pub enum AstType {
     Top,
     Bottom,
     Function(Vec<AstType>, Rc<AstType>),
+    Variant(Vec<(VariantName, Vec<AstType>)>),
     Record(Vec<(FieldName, AstType)>),
     Recursive(VarName, Rc<AstType>),
     TypeVariable(VarName),
@@ -84,6 +87,13 @@ impl AstType {
                 Record(fields) => {
                     for (_, ast_type) in fields {
                         walk_polar_vars(ast_type, positive.clone(), negative.clone(), polarity);
+                    }
+                }
+                Variant(variants) => {
+                    for (_, ast_types) in variants {
+                        for ast_type in ast_types {
+                            walk_polar_vars(ast_type, positive.clone(), negative.clone(), polarity);
+                        }
                     }
                 }
                 Recursive(var, expr) => {
@@ -124,7 +134,16 @@ impl AstType {
             Record(fields) => Record(
                 fields
                     .iter()
-                    .map(|(name, arg)| (name.clone(), arg.drop_vars(polar_vars, polarity)))
+                    .map(|(name, field)| (name.clone(), field.drop_vars(polar_vars, polarity)))
+                    .collect(),
+            ),
+            Variant(variants) => Variant(
+                variants
+                    .iter()
+                    .map(|(name, ast_types)| {
+                        let ast_types = ast_types.iter().map(|ast_type| ast_type.drop_vars(polar_vars, polarity)).collect();
+                        (name.clone(), ast_types)
+                    })
                     .collect(),
             ),
             Recursive(var, ast_type) => Recursive(

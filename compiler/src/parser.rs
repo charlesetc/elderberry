@@ -113,13 +113,13 @@ enum Token {
     #[regex(r#""(?:[^"]|\\")*""#, unescape_string)]
     String(String),
 
-    #[regex("(_\\+|-)?[_0-9]+", |lex| lex.slice().chars().filter_map(is_not_underscore).collect::<String>().parse())]
+    #[regex("(_\\+|-)?[0-9][_0-9]*", |lex| lex.slice().chars().filter_map(is_not_underscore).collect::<String>().parse())]
     Int(i64),
 
     #[regex("[_0-9]+\\.[_0-9]+", |lex| lex.slice().chars().filter_map(is_not_underscore).collect::<String>().parse())]
     Float(f64),
 
-    #[regex("[a-z][a-zA-Z]*", |lex| lex.slice().parse())]
+    #[regex("(_|[a-z])(_|[a-zA-Z])*", |lex| lex.slice().parse())]
     LowerVar(String),
 
     #[regex("[A-Z][a-zA-Z]*", |lex| lex.slice().parse())]

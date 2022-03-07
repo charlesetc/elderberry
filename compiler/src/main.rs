@@ -1,4 +1,3 @@
-use std::env;
 use std::fs;
 use clap::Parser;
 
@@ -19,15 +18,15 @@ fn main() {
         Cli::Compile { filename } => {
             let contents = fs::read_to_string(filename).expect("unable to read file");
             let ast = elderberry_compiler::parse(&contents);
-            let typed_ast = elderberry_compiler::typecheck(&ast);
+            elderberry_compiler::typecheck(&ast);
             let js = elderberry_compiler::generate(ast);
             println!("{}", js);
         }
         Cli::Typecheck { filename } => {
             let contents = fs::read_to_string(filename).expect("unable to read file");
             let ast = elderberry_compiler::parse(&contents);
-            let typed_ast = elderberry_compiler::typecheck(&ast);
-            println!("Typed ast: {:?}", typed_ast);
+            let type_of_ast = elderberry_compiler::typecheck(&ast);
+            println!("Type of ast: {:?}", type_of_ast);
         }
     }
 }

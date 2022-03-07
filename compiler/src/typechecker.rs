@@ -2,9 +2,9 @@ use crate::ast::*;
 use crate::types::{
     unique_name, AstType, ConcreteType, MaybeQuantified, Primitive, SimpleType, VariableState,
 };
+use by_address::ByAddress;
 use im::OrdMap as ImMap;
 use im::OrdSet as ImSet;
-use by_address::ByAddress;
 use std::cell::RefCell;
 use std::collections::BTreeMap as MutMap;
 use std::collections::BTreeSet as MutSet;
@@ -27,6 +27,7 @@ fn new_lower_bound(
         least_upper_bound_concrete(existing_lower_bound, lower_bound.clone(), cache.clone());
     state.borrow_mut().lower_bound = new_lower_bound;
     let upper_bound = state.borrow().upper_bound.clone();
+    println!("NEW LOWER BOUND constraining {:#?} <: {:#?}", lower_bound, upper_bound);
     constrain_concrete_types(lower_bound, upper_bound, cache);
 }
 fn new_upper_bound(
@@ -82,25 +83,52 @@ fn greatest_lower_bound_concrete(
             ))
         }
         (Primitive(a), Primitive(b)) if a == b => Rc::new(Primitive(a.clone())),
+        (Variant(a_variants), Variant(b_variants)) => {
+            let all_keys: ImSet<String> = a_variants.keys().chain(b_variants.keys()).collect();
+            let variants = all_keys
+                .into_iter()
+                .map(|key| {
+                    let value = match (a_variants.get(&key), b_variants.get(&key)) {
+                        (None, None) => panic!("bug: at least one of these should have each key"),
+                        (None, Some(args)) | (Some(args), None) => args.clone(),
+                        (Some(a_args), Some(b_args)) => {
+                            if a_args.len() != b_args.len() {
+                                panic!("variant {} has been used with {} arguments and also {} arguments", key.clone(), a_args.len(), b_args.len())
+                            }
+                            let mut args = vec![];
+                            for i in 0..a_args.len() {
+                                let a_arg = &a_args[i];
+                                let b_arg = &b_args[i];
+                                let arg = least_upper_bound(a_arg.clone(), b_arg.clone(), cache.clone());
+                                args.push(arg)
+                            }
+                            args
+                        }
+                    };
+                    (key, value)
+                })
+                .collect();
+            Rc::new(Variant(variants))
+        }
         (Record(a_fields), Record(b_fields)) => {
             let all_keys: ImSet<String> = a_fields.keys().chain(b_fields.keys()).collect();
             let fields = all_keys
-                .iter()
+                .into_iter()
                 .map(|key| {
-                    let value = match (a_fields.get(key), b_fields.get(key)) {
-                        (None, None) => panic!("at least one of these should have each key"),
+                    let value = match (a_fields.get(&key), b_fields.get(&key)) {
+                        (None, None) => panic!("bug: at least one of these should have each key"),
                         (None, Some(value)) | (Some(value), None) => value.clone(),
                         (Some(a_value), Some(b_value)) => {
                             least_upper_bound(a_value.clone(), b_value.clone(), cache.clone())
                         }
                     };
-                    (key.clone(), value)
+                    (key, value)
                 })
                 .collect();
             Rc::new(Record(fields))
         }
         _ => panic!(
-            "type error, cannot unify least upper bounds: {:?} {:?}",
+            "type error, cannot unify least upper bounds: {:#?} {:#?}",
             a, b
         ),
     }
@@ -134,24 +162,49 @@ fn least_upper_bound_concrete(
             ))
         }
         (Primitive(a), Primitive(b)) if a == b => Rc::new(Primitive(a.clone())),
+        (Variant(a_variants), Variant(b_variants)) => {
+            let all_keys: ImSet<String> = a_variants.keys().chain(b_variants.keys()).collect();
+            let variants = all_keys
+                .into_iter()
+                .filter_map(|key| {
+                    match (a_variants.get(&key), b_variants.get(&key)) {
+                        (None, None) => panic!("bug: at least one of these should have each key"),
+                        (None, Some(_)) | (Some(_), None) => None,
+                        (Some(a_args), Some(b_args)) => {
+                            if a_args.len() != b_args.len() {
+                                panic!("variant {} has been used with {} arguments and also {} arguments", key.clone(), a_args.len(), b_args.len())
+                            }
+                            let mut args = vec![];
+                            for i in 0..a_args.len() {
+                                let a_arg = &a_args[i];
+                                let b_arg = &b_args[i];
+                                let arg = least_upper_bound(a_arg.clone(), b_arg.clone(), cache.clone());
+                                args.push(arg)
+                            }
+                            Some((key, args))
+                        }
+                    }
+                })
+                .collect();
+            Rc::new(Variant(variants))
+        }
         (Record(a_fields), Record(b_fields)) => {
             let all_keys: ImSet<String> = a_fields.keys().chain(b_fields.keys()).collect();
             let fields = all_keys
                 .iter()
-                .filter_map(|key| {
-                    match (a_fields.get(key), b_fields.get(key)) {
-                        (None, None) => panic!("at least one of these should have each key"),
-                        (None, Some(_)) | (Some(_), None) => None,
-                        (Some(a_value), Some(b_value)) => {
-                            Some((key.clone(), greatest_lower_bound(a_value.clone(), b_value.clone(), cache.clone())))
-                        }
-                    }
+                .filter_map(|key| match (a_fields.get(key), b_fields.get(key)) {
+                    (None, None) => panic!("at least one of these should have each key"),
+                    (None, Some(_)) | (Some(_), None) => None,
+                    (Some(a_value), Some(b_value)) => Some((
+                        key.clone(),
+                        greatest_lower_bound(a_value.clone(), b_value.clone(), cache.clone()),
+                    )),
                 })
                 .collect();
             Rc::new(Record(fields))
         }
         _ => panic!(
-            "type error, cannot unify least upper bounds: {:?} {:?}",
+            "type error, cannot unify least upper bounds: {:#?} {:#?}",
             a, b
         ),
     }
@@ -237,7 +290,28 @@ fn constrain_concrete_types(
                 }
             }
         }
-        _ => type_error(format!("cannot constrain {:?} <: {:?}", subtype, supertype)),
+        (Variant(variants1), Variant(variants2)) => {
+            for (name, args2) in variants1.iter() {
+                match variants2.get(name) {
+                    // Similar to function definition
+                    Some(args1) =>  {
+                        if args1.len() != args2.len() {
+                            type_error(format!(
+                                "matched against variant {} with {} arguments, but it only takes {}",
+                                name,
+                                args2.len(),
+                                args1.len()
+                            ));
+                            }
+                        for (arg1, arg2) in args1.iter().zip(args2.iter()) {
+                            constrain_(arg1.clone(), arg2.clone(), cache.clone());
+                        }
+                    }
+                    None => type_error(format!("missing variant {}", name)),
+                }
+            }
+        }
+        _ => type_error(format!("cannot constrain {:#?} <: {:#?}", subtype, supertype)),
     }
 }
 
@@ -258,8 +332,7 @@ fn constrain_(subtype: Rc<SimpleType>, supertype: Rc<SimpleType>, cache: Constra
                 new_upper_bound(v.clone(), supertype.clone(), cache);
             }
             (Concrete(subtype), Variable(v)) => {
-                new_lower_bound(v.clone(), subtype.clone(), cache);
-            }
+                new_lower_bound(v.clone(), subtype.clone(), cache); }
         }
     }
 }
@@ -313,31 +386,51 @@ fn typecheck_constant(constant: &Constant) -> Rc<SimpleType> {
     }
 }
 
-fn typecheck_pattern(pat: &Pattern, var_ctx: &ImMap<String, Rc<dyn MaybeQuantified>>) -> (Rc<SimpleType>, ImMap<String, Rc<dyn MaybeQuantified>>) {
+fn typecheck_pattern(
+    pat: &Pattern,
+    var_ctx: &ImMap<String, Rc<dyn MaybeQuantified>>,
+) -> (Rc<SimpleType>, ImMap<String, Rc<dyn MaybeQuantified>>) {
     use Pattern::*;
     match pat {
         Constant(c) => (typecheck_constant(c), var_ctx.clone()),
-        Variant(_name, _patterns) => unimplemented!(),
+        Variant(name, patterns) => {
+            let mut var_ctx = var_ctx.clone();
+            let pattern_types = patterns.iter().map(|pattern| {
+                let (pattern_type, new_var_ctx) = typecheck_pattern(pattern, &var_ctx);
+                var_ctx = new_var_ctx;
+                pattern_type
+            }).collect();
+            (Rc::new(SimpleType::Concrete(Rc::new(ConcreteType::Variant(
+                im::ordmap! {name.clone() => pattern_types}
+                )))), var_ctx)
+
+        }
         Record(fields) => {
             let mut var_ctx = var_ctx.clone();
-            let fields = fields.iter().map(|(name, pattern)| {
-                let (pattern_type, var_ctx_) = typecheck_pattern(pattern, &var_ctx);
-                var_ctx = var_ctx_;
-                (name, pattern_type)
-            }).collect();
-            (Rc::new(SimpleType::Concrete(Rc::new(ConcreteType::Record(fields)))), var_ctx)
+            let fields = fields
+                .iter()
+                .map(|(name, pattern)| {
+                    let (pattern_type, new_var_ctx) = typecheck_pattern(pattern, &var_ctx);
+                    var_ctx = new_var_ctx;
+                    (name, pattern_type)
+                })
+                .collect();
+            (
+                Rc::new(SimpleType::Concrete(Rc::new(ConcreteType::Record(fields)))),
+                var_ctx,
+            )
         }
         Var(name) => {
             let var_type = SimpleType::fresh_var();
             (var_type.clone(), var_ctx.update(name.clone(), var_type))
         }
-        Wildcard => (SimpleType::fresh_var(), var_ctx.clone())
+        Wildcard => (SimpleType::fresh_var(), var_ctx.clone()),
     }
 }
 
-fn typecheck_expr(expr : &Expr, var_ctx: &ImMap<String, Rc<dyn MaybeQuantified>>) -> Rc<SimpleType> {
+fn typecheck_expr(expr: &Expr, var_ctx: &ImMap<String, Rc<dyn MaybeQuantified>>) -> Rc<SimpleType> {
     use Expr::*;
-    let simple_type = match expr {
+    println!("TYPECHECK EXPR {:#?}", expr.clone()); let simple_type = match expr {
         Constant(c) => typecheck_constant(c),
         Var(name) => match var_ctx.get(name) {
             Some(maybe_quantified) => maybe_quantified.clone().instantiate(),
@@ -412,8 +505,15 @@ fn typecheck_expr(expr : &Expr, var_ctx: &ImMap<String, Rc<dyn MaybeQuantified>>
             }
             return_type
         }
-        Variant(_, _) => unimplemented!(),
+        Variant(name, args) => {
+            let arg_types = args.iter().map(|arg| typecheck_expr(arg, var_ctx)).collect();
+            Rc::new(SimpleType::Concrete(Rc::new(ConcreteType::Variant(
+                im::ordmap!{name.clone() => arg_types}
+            ))))
+        }
     };
+    println!("\n... TYPECHECK {:#?}", expr.clone());
+    println!("TYPECHECK GOT SIMPLE TYPE {:#?}", simple_type);
     simple_type
 }
 
@@ -435,6 +535,21 @@ fn freshen_concrete_type(
                 args,
                 freshen_simple_type(ret.clone(), qvar_context.clone()),
             ))
+        }
+        Variant(ref variants) => {
+            let variants = variants
+                .iter()
+                .map(|(name, simple_types)| {
+                    let simple_types: Vec<_> = simple_types
+                        .iter()
+                        .map(|simple_type| {
+                            freshen_simple_type(simple_type.clone(), qvar_context.clone())
+                        })
+                        .collect();
+                    (name.clone(), simple_types)
+                })
+                .collect();
+            Rc::new(Variant(variants))
         }
         Record(ref fields) => {
             let fields = fields
@@ -499,7 +614,6 @@ impl MaybeQuantified for PolymorphicType {
     }
 }
 
-
 type PolarVariable = (String, bool);
 
 fn coalesce_concrete_type_after_recursion_check(
@@ -557,6 +671,28 @@ fn coalesce_concrete_type_after_recursion_check(
                 .collect::<Vec<_>>();
             AstType::Record(fields)
         }
+        ConcreteType::Variant(variants) => {
+            let variants = variants
+                .iter()
+                .map(|(name, variant_types)| {
+                    let variant_types = variant_types
+                        .iter()
+                        .map(|variant_type| {
+                            coalesce_simple_type_(
+                                variant_type.clone(),
+                                recursive_variables_vars.clone(),
+                                recursive_variables_types.clone(),
+                                in_process_vars.clone(),
+                                in_process_types.clone(),
+                                polarity,
+                            )
+                        })
+                        .collect();
+                    (name.clone(), variant_types)
+                })
+                .collect::<Vec<_>>();
+            AstType::Variant(variants)
+        }
     }
 }
 
@@ -586,7 +722,10 @@ fn coalesce_concrete_type(
             in_process_types,
             polarity,
         );
-        match recursive_variables_types.borrow().get(&concrete_type.into()) {
+        match recursive_variables_types
+            .borrow()
+            .get(&concrete_type.into())
+        {
             Some(name) => AstType::Recursive(name.clone(), Rc::new(ast_type)),
             None => ast_type,
         }
@@ -1004,6 +1143,92 @@ mod test {
         insta::assert_debug_snapshot!(test("let z = if true { wow: 2 } else { that: 2 } "), @r###"
         Record(
             [],
+        )
+        "###);
+    }
+
+    #[test]
+    fn test_variants() {
+        insta::assert_debug_snapshot!(test("let z = Hi(2)"), @r###"
+        Variant(
+            [
+                (
+                    "Hi",
+                    [
+                        Primitive(
+                            Int,
+                        ),
+                    ],
+                ),
+            ],
+        )
+        "###);
+        insta::assert_debug_snapshot!(test("let f = |x| Hi(x) let z = f(2) let m = f(This)"), @r###"
+        Variant(
+            [
+                (
+                    "Hi",
+                    [
+                        Variant(
+                            [
+                                (
+                                    "This",
+                                    [],
+                                ),
+                            ],
+                        ),
+                    ],
+                ),
+            ],
+        )
+        "###);
+    }
+
+    #[test]
+    fn test_variant_patterns() {
+        insta::assert_debug_snapshot!(test("let f = |x| match x { Wow(a,b) -> 2, Foo(c) -> 3 }"), @r###"
+        Function(
+            [
+                Variant(
+                    [
+                        (
+                            "Foo",
+                            [
+                                Bottom,
+                            ],
+                        ),
+                        (
+                            "Wow",
+                            [
+                                Bottom,
+                                Bottom,
+                            ],
+                        ),
+                    ],
+                ),
+            ],
+            Primitive(
+                Int,
+            ),
+        )
+        "###);
+        insta::assert_debug_snapshot!(test("let f = |x| Hi(x) let z = f(2) let m = f(This)"), @r###"
+        Variant(
+            [
+                (
+                    "Hi",
+                    [
+                        Variant(
+                            [
+                                (
+                                    "This",
+                                    [],
+                                ),
+                            ],
+                        ),
+                    ],
+                ),
+            ],
         )
         "###);
     }
