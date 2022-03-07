@@ -1,12 +1,11 @@
+let map = |o, f| {
+	match o {
+		None -> None,
+		Some(a) -> Some(f(a)),
+	}
+}
 
-let nil = None
-let cons = |x, l| Cons(x, l)
-
-let a = cons(2,cons(3,nil))
-
-let gen_5 =
-	if x < 0
-	then
+let z = map(Some("hi"), |x| 2)
 
 /* 
 let z = |x| if x { x } else { x }

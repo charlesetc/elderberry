@@ -251,6 +251,7 @@ impl VariableStates {
     }
 
     pub fn link_to(&mut self, link_from: &VarName, link_to: &VarName) {
+        // println!("LINKING {:?} -> {:?}", link_from, link_to);
         let link_to = self.find(link_to);
         let link_from = self.find(link_from);
         if &link_from == &link_to {
