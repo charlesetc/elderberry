@@ -254,7 +254,6 @@ impl VariableStates {
         if &link_from == &link_to {
             return
         }
-        println!("LINKING {:?} : {:?} -> {:?} : {:?}", link_from, self.0[&link_from], link_to, self.0[&link_to]);
         self.0.insert(link_from.clone(), VarLink::Link(link_to.clone()));
     }
 

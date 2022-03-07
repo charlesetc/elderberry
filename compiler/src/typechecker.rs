@@ -132,7 +132,7 @@ fn greatest_lower_bound_concrete(
             Rc::new(Record(fields))
         }
         _ => panic!(
-            "type error, cannot unify least upper bounds: {:#?} {:#?}",
+            "type error: cannot unify greatest lower bounds: {:?} and {:?}",
             a, b
         ),
     }
@@ -213,7 +213,7 @@ fn least_upper_bound_concrete(
             Rc::new(Record(fields))
         }
         _ => panic!(
-            "type error, cannot unify least upper bounds: {:#?} {:#?}",
+            "type error: cannot unify least upper bounds: {:?} and {:?}",
             a, b
         ),
     }
@@ -1341,6 +1341,19 @@ mod test {
         Primitive(
             Int,
         )
-        "###)
+        "###);
+    }
+
+    #[test]
+    fn test_match_and_apply() {
+        insta::assert_debug_snapshot!(
+        test(" \
+        let unwrap_default = |x| match x { Some(a) -> a, None -> 2 }  \
+        let z = unwrap_default(None) \
+        "), @r###"
+        Primitive(
+            Int,
+        )
+        "###);
     }
 }
