@@ -2,6 +2,7 @@ use im::OrdMap as ImMap;
 use im::OrdSet as ImSet;
 use std::cell::RefCell;
 use std::collections::BTreeSet as MutSet;
+use std::collections::HashMap as MutMap;
 use std::rc::Rc;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -27,20 +28,13 @@ pub enum ConcreteType {
     Variant(ImMap<VariantName, Vec<Rc<SimpleType>>>),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct VariableState {
-    pub lower_bound: Rc<ConcreteType>,
-    pub upper_bound: Rc<ConcreteType>,
-    pub unique_name: VarName,
-}
-
 // We have two refcells here so we can "unify" vars by replacing one
 // This way future edits to the VariableState affect all occurrences of the variable.
 // A different way to do this would be to have these variable names be indexes into a
 // 'global' hashmap of "variable state". Either way, we needed another layer of indirection.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SimpleType {
-    Variable(Rc<RefCell<VariableState>>),
+    Variable(VarName),
     Concrete(Rc<ConcreteType>),
 }
 
@@ -141,7 +135,10 @@ impl AstType {
                 variants
                     .iter()
                     .map(|(name, ast_types)| {
-                        let ast_types = ast_types.iter().map(|ast_type| ast_type.drop_vars(polar_vars, polarity)).collect();
+                        let ast_types = ast_types
+                            .iter()
+                            .map(|ast_type| ast_type.drop_vars(polar_vars, polarity))
+                            .collect();
                         (name.clone(), ast_types)
                     })
                     .collect(),
@@ -200,11 +197,11 @@ impl AstType {
 }
 
 pub trait MaybeQuantified {
-    fn instantiate(self: Rc<Self>) -> Rc<SimpleType>;
+    fn instantiate(self: Rc<Self>, variable_states: Rc<RefCell<VariableStates>>) -> Rc<SimpleType>;
 }
 
 impl MaybeQuantified for SimpleType {
-    fn instantiate(self: Rc<Self>) -> Rc<SimpleType> {
+    fn instantiate(self: Rc<Self>, _variable_states: Rc<RefCell<VariableStates>>) -> Rc<SimpleType> {
         self
     }
 }
@@ -220,19 +217,109 @@ pub fn unique_name() -> VarName {
     })
 }
 
+#[derive(Debug)]
+pub struct VariableState {
+    lower_bound: Rc<ConcreteType>,
+    upper_bound: Rc<ConcreteType>,
+}
+
 impl VariableState {
     fn new() -> Self {
         VariableState {
             lower_bound: Rc::new(ConcreteType::Bottom),
             upper_bound: Rc::new(ConcreteType::Top),
-            unique_name: unique_name(),
         }
     }
 }
 
-impl SimpleType {
-    pub fn fresh_var() -> Rc<Self> {
-        let state = Rc::new(RefCell::new(VariableState::new()));
-        Rc::new(SimpleType::Variable(state))
+#[derive(Debug)]
+enum VarLink<T> {
+    Value(T),
+    Link(VarName)
+}
+
+// TODO: Make VarName a newtype here
+// TODO: do I actually need the doubly-nested RefCell here? Can't I just get a mutable
+// pointer to the contents within the hashtable?
+pub struct VariableStates(MutMap<VarName, VarLink<VariableState>>);
+
+impl VariableStates {
+
+    pub fn new() -> Self {
+        VariableStates(MutMap::new())
+    }
+
+    pub fn link_to(&mut self, link_from : &VarName, link_to : &VarName) {
+        let link_to = self.find(link_to);
+        let link_from = self.find(link_from);
+        if &link_from == &link_to {
+            return
+        }
+        println!("LINKING {:?} : {:?} -> {:?} : {:?}", link_from, self.0[&link_from], link_to, self.0[&link_to]);
+        self.0.insert(link_from.clone(), VarLink::Link(link_to.clone()));
+    }
+
+    pub fn fresh_var_name(&mut self) -> String {
+        let name = unique_name();
+        let varlink = VarLink::Value(VariableState::new());
+        self.0.insert(name.clone(), varlink);
+        name
+    }
+
+    pub fn fresh_var(&mut self) -> Rc<SimpleType> {
+        Rc::new(SimpleType::Variable(self.fresh_var_name()))
+    }
+
+    pub fn upper_bound(&self, v: &VarName) -> Rc<ConcreteType> {
+        self[v].upper_bound.clone()
+    }
+
+    pub fn lower_bound(&self, v: &VarName) -> Rc<ConcreteType> {
+        self[v].lower_bound.clone()
+    }
+
+    pub fn set_lower_bound(&mut self, v: &VarName, value: Rc<ConcreteType>) {
+        self.find_and_map(v, |state| state.lower_bound = value);
+    }
+
+    pub fn set_upper_bound(&mut self, v: &VarName, value: Rc<ConcreteType>) {
+        self.find_and_map(v, |state| state.upper_bound = value);
+    }
+
+    fn find_with_references(&self, v: &VarName, references : MutSet<VarName>) -> (VarName, MutSet<VarName>) {
+        match &self.0[v] {
+            VarLink::Value(_) => (v.clone(), references),
+            VarLink::Link(to_) => {
+                let (found, mut references) = self.find_with_references(to_, references);
+                references.insert(to_.clone());
+                (found, references)
+            }
+        }
+    }
+
+    pub fn find(&mut self, v: &VarName) -> VarName {
+        let (found, references) = self.find_with_references(v, MutSet::new());
+        for reference in references {
+            self.0.insert(v.clone(), VarLink::Link(reference));
+        }
+        found
+    }
+
+    fn find_and_map<F>(&mut self, v: &VarName, f: F) where F : FnOnce(&mut VariableState) {
+        let found = self.find(v);
+        match self.0.get_mut(&found) {
+            Some(VarLink::Value(state)) => f(state),
+            _ => panic!("bug: we just found it!")
+        }
+    }
+}
+
+impl std::ops::Index<&str> for VariableStates {
+    type Output = VariableState;
+    fn index(&self, index: &str) -> &VariableState {
+        match &self.0[index] {
+            VarLink::Value(v) => v,
+            VarLink::Link(name) => &self[name],
+        }
     }
 }

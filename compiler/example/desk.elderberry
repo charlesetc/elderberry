@@ -1,6 +1,12 @@
+let z = |x| if x { x } else { x }
+
+/* let rec f = |x| f(f(x)) */
+
+/* 
 let unwrap_default = |x| match true { true -> x, false -> 2 }
 
 let z = unwrap_default(None)
+*/
 
 /* let unwrap_default = |x| match x { Some(a) -> a, None -> 2 } */
 
