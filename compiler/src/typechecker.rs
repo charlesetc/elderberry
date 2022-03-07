@@ -543,7 +543,6 @@ fn typecheck_expr(expr: &Expr, var_ctx: &ImMap<String, Rc<dyn MaybeQuantified>>,
             ))))
         }
     };
-    println!("EXPR {:?} : {:?}", expr, simple_type);
     simple_type
 }
 
@@ -801,6 +800,7 @@ fn coalesce_simple_type_(
             polarity,
         ),
         Variable(v) => {
+            let v = variable_states.borrow_mut().find(v);
             let polar_var = (v.clone(), polarity);
             if in_process_vars.contains(&polar_var) {
                 let name = recursive_variables_vars
@@ -812,9 +812,9 @@ fn coalesce_simple_type_(
             } else {
                 let in_process = in_process_vars.update(polar_var.clone());
                 let bounded_type = if polarity {
-                    variable_states.borrow().lower_bound(v)
+                    variable_states.borrow().lower_bound(&v)
                 } else {
-                    variable_states.borrow().upper_bound(v)
+                    variable_states.borrow().upper_bound(&v)
                 };
                 let ast_type = coalesce_concrete_type(
                     bounded_type,
@@ -1307,8 +1307,13 @@ mod test {
                     [
                         (
                             "name",
-                            TypeVariable(
-                                "a5",
+                            Intersection(
+                                TypeVariable(
+                                    "a5",
+                                ),
+                                Primitive(
+                                    Int,
+                                ),
                             ),
                         ),
                         (

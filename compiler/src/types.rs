@@ -239,8 +239,7 @@ enum VarLink<T> {
 }
 
 // TODO: Make VarName a newtype here
-// TODO: do I actually need the doubly-nested RefCell here? Can't I just get a mutable
-// pointer to the contents within the hashtable?
+#[derive(Debug)]
 pub struct VariableStates(MutMap<VarName, VarLink<VariableState>>);
 
 impl VariableStates {
