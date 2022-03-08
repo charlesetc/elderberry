@@ -531,10 +531,11 @@ fn typecheck_expr(
     use Expr::*;
     let simple_type = match expr {
         Constant(c) => typecheck_constant(c),
-        Var(name) => match var_ctx.get(name) {
+        Var(None, name) => match var_ctx.get(name) {
             Some(maybe_quantified) => maybe_quantified.clone().instantiate(variable_states),
             None => type_error(format!("variable \"{}\" not found", name)),
         },
+        Var(Some(_path), _name) => unimplemented!(),
         Lambda(args, expr) => {
             let (arg_types, var_ctx) = {
                 let mut arg_types = vec![];

@@ -35,6 +35,8 @@ pub enum Statements {
     Let(RecFlag, VarName, Box<Expr>, Box<Statements>),
 }
 
+type ModulePath = Vec<String>;
+
 #[derive(Debug, Clone)]
 pub enum Expr {
     Constant(Constant),
@@ -45,7 +47,7 @@ pub enum Expr {
     Lambda(Vec<Pattern>, Box<Expr>),
     Apply(Box<Expr>, Vec<Expr>),
     Block(Statements),
-    Var(VarName),
+    Var(Option<ModulePath>, VarName),
     If(Box<Expr>, Box<Expr>, Option<Box<Expr>>),
 }
 

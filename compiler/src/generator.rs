@@ -130,7 +130,8 @@ fn generate_expr(out: &mut String, expr: &Expr) {
             out.push_str(&escape(s));
             out.push_str("\"");
         }
-        Expr::Var(x) => out.push_str(&x),
+        Expr::Var(None, x) => out.push_str(&x),
+        Expr::Var(Some(_), _) => unimplemented!(),
         Expr::Record(fields) => {
             out.push_str("{");
             for (name, expr) in fields {

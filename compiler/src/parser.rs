@@ -448,11 +448,37 @@ fn parse_statements(tokens: &mut &[TokenWithSpan]) -> Statements {
     }
 }
 
+fn parse_module_ident_path_(tokens: &mut &[TokenWithSpan]) -> (Vec<VarName>, VarName) {
+    match tokens {
+        [(Token::CapitalVar(module_name), _), (Token::Dot, _), rest @ ..] => {
+            *tokens = rest;
+            let (mut path, name) = parse_module_ident_path_(tokens);
+            path.push(module_name.clone());
+            (path, name)
+        }
+        [(Token::LowerVar(name), _), rest @ ..] => {
+            *tokens = rest;
+            (vec![], name.clone())
+        }
+        _ => expected(
+            "a module path, (something like MyModule.Tests.test)",
+            5,
+            tokens,
+        ),
+    }
+}
+
+fn parse_module_ident_path(tokens: &mut &[TokenWithSpan]) -> Expr {
+    let (mut path, name) = parse_module_ident_path_(tokens);
+    path.reverse();
+    Expr::Var(Some(path), name)
+}
+
 fn parse_expression_without_operators(tokens: &mut &[TokenWithSpan]) -> Expr {
     match tokens {
         [(Token::LowerVar(name), _), rest @ ..] => {
             *tokens = rest;
-            Expr::Var(name.to_string())
+            Expr::Var(None, name.to_string())
         }
         [(Token::OpenBrace, _), rest @ ..] if
             match rest { [(Token::LowerVar(_), _), (Token::Colon, _), ..] => true, _ => false }
@@ -474,6 +500,9 @@ fn parse_expression_without_operators(tokens: &mut &[TokenWithSpan]) -> Expr {
             *tokens = rest;
             let exprs = parse_variant_body(tokens);
             Expr::Variant(name.to_string(), exprs)
+        }
+        [(Token::CapitalVar(_), _), (Token::Dot, _), ..] => {
+            parse_module_ident_path(tokens)
         }
         [(Token::CapitalVar(name), _), rest @ ..] => {
             *tokens = rest;
@@ -573,11 +602,11 @@ fn parse_expression(tokens: &mut &[TokenWithSpan]) -> Expr {
     parse_operators(tokens, expr)
 }
 
-fn parse_module_path_in_reverse(tokens: &mut &[TokenWithSpan]) -> Vec<VarName> {
+fn parse_module_alias_path_in_reverse(tokens: &mut &[TokenWithSpan]) -> Vec<VarName> {
     match tokens {
         [(Token::CapitalVar(name), _), (Token::Dot, _), rest @ ..] => {
             *tokens = rest;
-            let mut ret = parse_module_path_in_reverse(tokens);
+            let mut ret = parse_module_alias_path_in_reverse(tokens);
             ret.push(name.to_string());
             ret
         }
@@ -589,8 +618,8 @@ fn parse_module_path_in_reverse(tokens: &mut &[TokenWithSpan]) -> Vec<VarName> {
     }
 }
 
-fn parse_module_path(tokens: &mut &[TokenWithSpan]) -> Vec<VarName> {
-    let mut ret = parse_module_path_in_reverse(tokens);
+fn parse_module_alias_path(tokens: &mut &[TokenWithSpan]) -> Vec<VarName> {
+    let mut ret = parse_module_alias_path_in_reverse(tokens);
     ret.reverse();
     ret
 }
@@ -630,17 +659,13 @@ fn parse_item(tokens: &mut &[TokenWithSpan]) -> Option<Item> {
         }
         [(Token::Module, _), (Token::CapitalVar(name), _), (Token::Equals, _), rest @ ..] => {
             *tokens = rest;
-            let path = parse_module_path(tokens);
+            let path = parse_module_alias_path(tokens);
             Some(Item::Alias(name.to_string(), path))
         }
         [(Token::Let, _), (Token::LowerVar(name), _), (Token::Equals, _), rest @ ..] => {
             *tokens = rest;
             let expr = parse_expression(tokens);
-            Some(Item::ItemLet(
-                Nonrecursive,
-                name.to_string(),
-                expr,
-            ))
+            Some(Item::ItemLet(Nonrecursive, name.to_string(), expr))
         }
         [(Token::Let, _), (Token::Rec, _), (Token::LowerVar(name), _), (Token::Equals, _), rest @ ..] =>
         {
@@ -693,7 +718,7 @@ pub fn parse(source: &str) -> Program {
 
 #[test]
 fn test_module_alias() {
-    insta::assert_debug_snapshot!(parse("module X = B module C = B.Y"), @r###"
+    insta::assert_debug_snapshot!(parse("module X = B module C = B.X.Y.Z"), @r###"
     [
         Alias(
             "X",
@@ -705,7 +730,9 @@ fn test_module_alias() {
             "C",
             [
                 "B",
+                "X",
                 "Y",
+                "Z",
             ],
         ),
     ]
@@ -769,6 +796,7 @@ fn test_record() {
                     (
                         "a",
                         Var(
+                            None,
                             "wow",
                         ),
                     ),
@@ -874,6 +902,7 @@ fn test_variant() {
                         "Sweet",
                         [
                             Var(
+                                None,
                                 "wow",
                             ),
                         ],
@@ -898,6 +927,7 @@ fn test_match() {
             "a",
             Match(
                 Var(
+                    None,
                     "b",
                 ),
                 [],
@@ -912,6 +942,7 @@ fn test_match() {
             "a",
             Match(
                 Var(
+                    None,
                     "b",
                 ),
                 [
@@ -967,6 +998,7 @@ fn test_comment() {
                     ),
                 ],
                 Var(
+                    None,
                     "x",
                 ),
             ),
@@ -992,6 +1024,7 @@ fn test_lambda() {
                     ),
                 ],
                 Var(
+                    None,
                     "x",
                 ),
             ),
@@ -1011,10 +1044,12 @@ fn test_apply() {
                 FieldAccess(
                     Apply(
                         Var(
+                            None,
                             "x",
                         ),
                         [
                             Var(
+                                None,
                                 "y",
                             ),
                         ],
@@ -1069,6 +1104,7 @@ fn test_block() {
                         ),
                         Sequence(
                             Var(
+                                None,
                                 "wow",
                             ),
                             Let(
@@ -1081,10 +1117,12 @@ fn test_block() {
                                 Sequence(
                                     Apply(
                                         Var(
+                                            None,
                                             "x",
                                         ),
                                         [
                                             Var(
+                                                None,
                                                 "y",
                                             ),
                                         ],
