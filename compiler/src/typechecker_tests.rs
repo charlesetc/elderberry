@@ -5,7 +5,7 @@ use crate::types::*;
 #[allow(dead_code)]
 fn test(source: &str) -> AstType {
     let ast = parse(source);
-    typecheck(&ast)
+    typecheck(ast)
 }
 
 #[test]

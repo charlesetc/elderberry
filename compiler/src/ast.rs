@@ -52,17 +52,22 @@ pub enum Expr {
 }
 
 #[derive(Debug, Clone)]
-pub enum Item {
+pub enum ModuleItem {
     Module(VarName, Vec<Item>),
     Alias(VarName, Vec<VarName>),
+}
+
+#[derive(Debug, Clone)]
+pub enum Item {
+    ModuleItem(ModuleItem),
     ItemLet(RecFlag, VarName, Expr),
 }
 
 impl Item {
     pub fn name(self) -> VarName {
         match self {
-            Item::Module(name, _) => name,
-            Item::Alias(name, _) => name,
+            Item::ModuleItem(ModuleItem::Module(name, _)) => name,
+            Item::ModuleItem(ModuleItem::Alias(name, _)) => name,
             Item::ItemLet(_, name, _) => name,
         }
     }

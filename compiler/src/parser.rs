@@ -655,12 +655,15 @@ fn parse_item(tokens: &mut &[TokenWithSpan]) -> Option<Item> {
         {
             *tokens = rest;
             let items = parse_module_body(tokens);
-            Some(Item::Module(name.to_string(), items))
+            Some(Item::ModuleItem(ModuleItem::Module(
+                name.to_string(),
+                items,
+            )))
         }
         [(Token::Module, _), (Token::CapitalVar(name), _), (Token::Equals, _), rest @ ..] => {
             *tokens = rest;
             let path = parse_module_alias_path(tokens);
-            Some(Item::Alias(name.to_string(), path))
+            Some(Item::ModuleItem(ModuleItem::Alias(name.to_string(), path)))
         }
         [(Token::Let, _), (Token::LowerVar(name), _), (Token::Equals, _), rest @ ..] => {
             *tokens = rest;
@@ -720,52 +723,64 @@ pub fn parse(source: &str) -> Program {
 fn test_module_alias() {
     insta::assert_debug_snapshot!(parse("module X = B module C = B.X.Y.Z"), @r###"
     [
-        Alias(
-            "X",
-            [
-                "B",
-            ],
-        ),
-        Alias(
-            "C",
-            [
-                "B",
+        ModuleItem(
+            Alias(
                 "X",
-                "Y",
-                "Z",
-            ],
+                [
+                    "B",
+                ],
+            ),
+        ),
+        ModuleItem(
+            Alias(
+                "C",
+                [
+                    "B",
+                    "X",
+                    "Y",
+                    "Z",
+                ],
+            ),
         ),
     ]
     "###);
     insta::assert_debug_snapshot!(parse("module X = B \n module C = B.Y"), @r###"
     [
-        Alias(
-            "X",
-            [
-                "B",
-            ],
+        ModuleItem(
+            Alias(
+                "X",
+                [
+                    "B",
+                ],
+            ),
         ),
-        Alias(
-            "C",
-            [
-                "B",
-                "Y",
-            ],
+        ModuleItem(
+            Alias(
+                "C",
+                [
+                    "B",
+                    "Y",
+                ],
+            ),
         ),
     ]
     "###);
     insta::assert_debug_snapshot!(parse("module A = { \n module B = C\n }"), @r###"
     [
-        Module(
-            "A",
-            [
-                Alias(
-                    "B",
-                    [
-                        "C",
-                    ],
-                ),
-            ],
+        ModuleItem(
+            Module(
+                "A",
+                [
+                    ModuleItem(
+                        Alias(
+                            "B",
+                            [
+                                "C",
+                            ],
+                        ),
+                    ),
+                ],
+            ),
         ),
     ]
     "###);

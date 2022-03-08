@@ -242,7 +242,7 @@ fn generate_expr(out: &mut String, expr: &Expr) {
 
 fn generate_toplevel_item(out: &mut String, item: &Item) {
     match item {
-        Item::Module(name, items) => {
+        Item::ModuleItem(ModuleItem::Module(name, items)) => {
             out.push_str("let ");
             out.push_str(&name);
             out.push_str("= {");
@@ -263,7 +263,7 @@ fn generate_toplevel_item(out: &mut String, item: &Item) {
             out.push_str("}");
             out.push_str("};");
         }
-        Item::Alias(name, path) => {
+        Item::ModuleItem(ModuleItem::Alias(name, path)) => {
             out.push_str("let ");
             out.push_str(&name);
             out.push_str("=");

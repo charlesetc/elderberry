@@ -967,14 +967,19 @@ fn coalesce_simple_type(
     )
 }
 
-pub fn typecheck(items: &Program) -> AstType {
+pub fn typecheck(items: Program) -> AstType {
     let mut var_ctx = ImMap::new();
     let variable_states = Rc::new(RefCell::new(VariableStates::new()));
-    let last_type = items
+    let (toplevel_modules, toplevel_lets): (Vec<Item>, Vec<Item>) =
+        items.into_iter().partition(|item| match item {
+            Item::ModuleItem(module_item) => true,
+            Item::ItemLet(_, _, _) => false,
+        });
+    let last_type = toplevel_lets
         .into_iter()
         .map(|item| match item {
             Item::ItemLet(Nonrecursive, name, expr) => {
-                let expr_type = typecheck_expr(expr, &var_ctx, variable_states.clone());
+                let expr_type = typecheck_expr(&expr, &var_ctx, variable_states.clone());
                 let ptype = PolymorphicType(expr_type.clone());
                 var_ctx.insert(name.clone(), Rc::new(ptype));
                 expr_type
@@ -982,7 +987,7 @@ pub fn typecheck(items: &Program) -> AstType {
             Item::ItemLet(Recursive, name, expr) => {
                 let name_type = variable_states.borrow_mut().fresh_var();
                 var_ctx.insert(name.clone(), name_type.clone());
-                let expr_type = typecheck_expr(expr, &var_ctx, variable_states.clone());
+                let expr_type = typecheck_expr(&expr, &var_ctx, variable_states.clone());
                 constrain(expr_type.clone(), name_type, variable_states.clone());
 
                 let ptype = PolymorphicType(expr_type.clone());
