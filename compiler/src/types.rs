@@ -1,8 +1,8 @@
 use im::OrdMap as ImMap;
 use im::OrdSet as ImSet;
 use std::cell::RefCell;
+use std::collections::BTreeMap as MutMap;
 use std::collections::BTreeSet as MutSet;
-use std::collections::HashMap as MutMap;
 use std::rc::Rc;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -38,6 +38,15 @@ pub enum SimpleType {
     Concrete(Rc<ConcreteType>),
 }
 
+#[derive(Debug, Clone)]
+pub enum ItemType<T> {
+    Module(Signature<T>),
+    QualifiedImport(Vec<VarName>),
+    Let(T),
+}
+
+pub type Signature<T> = Rc<RefCell<Vec<(VarName, ItemType<T>)>>>;
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum AstType {
     Top,
@@ -53,7 +62,7 @@ pub enum AstType {
 }
 
 impl AstType {
-    pub fn simplify(self) -> AstType {
+    pub fn simplify(&self) -> AstType {
         let polar_vars = self.polar_vars();
         let polarity = true;
         self.drop_vars(&polar_vars, polarity)

@@ -242,7 +242,7 @@ fn generate_expr(out: &mut String, expr: &Expr) {
 
 fn generate_toplevel_item(out: &mut String, item: &Item) {
     match item {
-        Item::ModuleItem(ModuleItem::Module(name, items)) => {
+        Item::Module(name, items) => {
             out.push_str("let ");
             out.push_str(&name);
             out.push_str("= {");
@@ -263,21 +263,21 @@ fn generate_toplevel_item(out: &mut String, item: &Item) {
             out.push_str("}");
             out.push_str("};");
         }
-        Item::ModuleItem(ModuleItem::Alias(name, path)) => {
+        Item::QualifiedImport(path, name) => {
             out.push_str("let ");
             out.push_str(&name);
             out.push_str("=");
             out.push_str(&path.join("."));
             out.push_str(";")
         }
-        Item::ItemLet(Nonrecursive, name, expr) => {
+        Item::Let(Nonrecursive, name, expr) => {
             out.push_str("let ");
             out.push_str(&name);
             out.push_str("=");
             generate_expr(out, &expr);
             out.push_str(";")
         }
-        Item::ItemLet(Recursive, _, _) => {
+        Item::Let(Recursive, _, _) => {
             unimplemented!()
         }
     }

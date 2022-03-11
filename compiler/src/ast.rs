@@ -9,6 +9,7 @@ pub enum Constant {
     Unit,
 }
 
+// Used for module names, variable names, and type variable names
 pub type VarName = String;
 pub type FieldName = String;
 pub type VariantName = String;
@@ -52,23 +53,18 @@ pub enum Expr {
 }
 
 #[derive(Debug, Clone)]
-pub enum ModuleItem {
-    Module(VarName, Vec<Item>),
-    Alias(VarName, Vec<VarName>),
-}
-
-#[derive(Debug, Clone)]
 pub enum Item {
-    ModuleItem(ModuleItem),
-    ItemLet(RecFlag, VarName, Expr),
+    Module(VarName, Vec<Item>),
+    QualifiedImport(Vec<VarName>, VarName),
+    Let(RecFlag, VarName, Expr),
 }
 
 impl Item {
     pub fn name(self) -> VarName {
         match self {
-            Item::ModuleItem(ModuleItem::Module(name, _)) => name,
-            Item::ModuleItem(ModuleItem::Alias(name, _)) => name,
-            Item::ItemLet(_, name, _) => name,
+            Item::Module(name, _) => name,
+            Item::QualifiedImport(_, name) => name,
+            Item::Let(_, name, _) => name,
         }
     }
 }

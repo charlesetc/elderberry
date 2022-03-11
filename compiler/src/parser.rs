@@ -86,6 +86,12 @@ enum Token {
     #[token("=")]
     Equals,
 
+    #[token("as")]
+    As,
+
+    #[token("import")]
+    Import,
+
     #[token(".")]
     Dot,
 
@@ -602,11 +608,11 @@ fn parse_expression(tokens: &mut &[TokenWithSpan]) -> Expr {
     parse_operators(tokens, expr)
 }
 
-fn parse_module_alias_path_in_reverse(tokens: &mut &[TokenWithSpan]) -> Vec<VarName> {
+fn parse_module_import_path_in_reverse(tokens: &mut &[TokenWithSpan]) -> Vec<VarName> {
     match tokens {
         [(Token::CapitalVar(name), _), (Token::Dot, _), rest @ ..] => {
             *tokens = rest;
-            let mut ret = parse_module_alias_path_in_reverse(tokens);
+            let mut ret = parse_module_import_path_in_reverse(tokens);
             ret.push(name.to_string());
             ret
         }
@@ -618,15 +624,14 @@ fn parse_module_alias_path_in_reverse(tokens: &mut &[TokenWithSpan]) -> Vec<VarN
     }
 }
 
-fn parse_module_alias_path(tokens: &mut &[TokenWithSpan]) -> Vec<VarName> {
-    let mut ret = parse_module_alias_path_in_reverse(tokens);
+fn parse_module_import_path(tokens: &mut &[TokenWithSpan]) -> Vec<VarName> {
+    let mut ret = parse_module_import_path_in_reverse(tokens);
     ret.reverse();
     ret
 }
 
 fn parse_module_body_in_reverse(tokens: &mut &[TokenWithSpan]) -> Vec<Item> {
-    let error_statement =
-        "module alias (=), let statement, or module definition ({), or module end (})";
+    let error_statement = "import, let statement, or module definition ({), or module end (})";
     match tokens {
         [] => expected(error_statement, 5, tokens),
         [(Token::CloseBrace, _), rest @ ..] => {
@@ -651,36 +656,36 @@ fn parse_module_body(tokens: &mut &[TokenWithSpan]) -> Vec<Item> {
 fn parse_item(tokens: &mut &[TokenWithSpan]) -> Option<Item> {
     match tokens {
         [] => None,
-        [(Token::Module, _), (Token::CapitalVar(name), _), (Token::Equals, _), (Token::OpenBrace, _), rest @ ..] =>
-        {
+        [(Token::Module, _), (Token::CapitalVar(name), _), (Token::OpenBrace, _), rest @ ..] => {
             *tokens = rest;
             let items = parse_module_body(tokens);
-            Some(Item::ModuleItem(ModuleItem::Module(
-                name.to_string(),
-                items,
-            )))
+            Some(Item::Module(name.to_string(), items))
         }
-        [(Token::Module, _), (Token::CapitalVar(name), _), (Token::Equals, _), rest @ ..] => {
+        [(Token::Import, _), rest @ ..] => {
             *tokens = rest;
-            let path = parse_module_alias_path(tokens);
-            Some(Item::ModuleItem(ModuleItem::Alias(name.to_string(), path)))
+            let path = parse_module_import_path(tokens);
+            expect_and_consume(tokens, Token::As);
+            match tokens {
+                [(Token::CapitalVar(name), _), rest @ ..] => {
+                    *tokens = rest;
+                    // (Token::CapitalVar(name), _), (Token::Equals, _),
+                    Some(Item::QualifiedImport(path, name.to_string()))
+                }
+                _ => panic!("Expected capital ident for new module name"),
+            }
         }
         [(Token::Let, _), (Token::LowerVar(name), _), (Token::Equals, _), rest @ ..] => {
             *tokens = rest;
             let expr = parse_expression(tokens);
-            Some(Item::ItemLet(Nonrecursive, name.to_string(), expr))
+            Some(Item::Let(Nonrecursive, name.to_string(), expr))
         }
         [(Token::Let, _), (Token::Rec, _), (Token::LowerVar(name), _), (Token::Equals, _), rest @ ..] =>
         {
             *tokens = rest;
             let expr = parse_expression(tokens);
-            Some(Item::ItemLet(Recursive, name.to_string(), expr))
+            Some(Item::Let(Recursive, name.to_string(), expr))
         }
-        _ => expected(
-            "module alias, let statement, or module definition",
-            5,
-            tokens,
-        ),
+        _ => expected("import, let statement, or module definition", 5, tokens),
     }
 }
 
@@ -720,73 +725,61 @@ pub fn parse(source: &str) -> Program {
 }
 
 #[test]
-fn test_module_alias() {
-    insta::assert_debug_snapshot!(parse("module X = B module C = B.X.Y.Z"), @r###"
+fn test_module_import() {
+    insta::assert_debug_snapshot!(parse("import B as X import B.X.Y.Z as C"), @r###"
     [
-        ModuleItem(
-            Alias(
-                "X",
-                [
-                    "B",
-                ],
-            ),
+        QualifiedImport(
+            [
+                "B",
+            ],
+            "X",
         ),
-        ModuleItem(
-            Alias(
-                "C",
-                [
-                    "B",
-                    "X",
-                    "Y",
-                    "Z",
-                ],
-            ),
+        QualifiedImport(
+            [
+                "B",
+                "X",
+                "Y",
+                "Z",
+            ],
+            "C",
         ),
     ]
     "###);
-    insta::assert_debug_snapshot!(parse("module X = B \n module C = B.Y"), @r###"
+    insta::assert_debug_snapshot!(parse("import B as X \n import B.Y as C"), @r###"
     [
-        ModuleItem(
-            Alias(
-                "X",
-                [
-                    "B",
-                ],
-            ),
+        QualifiedImport(
+            [
+                "B",
+            ],
+            "X",
         ),
-        ModuleItem(
-            Alias(
-                "C",
-                [
-                    "B",
-                    "Y",
-                ],
-            ),
+        QualifiedImport(
+            [
+                "B",
+                "Y",
+            ],
+            "C",
         ),
     ]
     "###);
-    insta::assert_debug_snapshot!(parse("module A = { \n module B = C\n }"), @r###"
+    insta::assert_debug_snapshot!(parse("module A { \n import C as B\n }"), @r###"
     [
-        ModuleItem(
-            Module(
-                "A",
-                [
-                    ModuleItem(
-                        Alias(
-                            "B",
-                            [
-                                "C",
-                            ],
-                        ),
-                    ),
-                ],
-            ),
+        Module(
+            "A",
+            [
+                QualifiedImport(
+                    [
+                        "C",
+                    ],
+                    "B",
+                ),
+            ],
         ),
     ]
     "###);
     insta::assert_debug_snapshot!(parse("let x = \"hi\""), @r###"
     [
-        ItemLet(
+        Let(
             Nonrecursive,
             "x",
             Constant(
@@ -803,7 +796,7 @@ fn test_module_alias() {
 fn test_record() {
     insta::assert_debug_snapshot!(parse("let x = { a: wow, b: {:} }"), @r###"
     [
-        ItemLet(
+        Let(
             Nonrecursive,
             "x",
             Record(
@@ -832,7 +825,7 @@ fn test_record() {
 fn test_field_access() {
     insta::assert_debug_snapshot!(parse("let x = {:}.bar.baz"), @r###"
     [
-        ItemLet(
+        Let(
             Nonrecursive,
             "x",
             FieldAccess(
@@ -853,7 +846,7 @@ fn test_field_access() {
 fn test_numbers() {
     insta::assert_debug_snapshot!(parse(r#"let s = { 2; 1_000_000; }"#), @r###"
     [
-        ItemLet(
+        Let(
             Nonrecursive,
             "s",
             Block(
@@ -882,7 +875,7 @@ fn test_numbers() {
 fn test_string() {
     insta::assert_debug_snapshot!(parse(r#"let s =  "beginning \"of\" \\the string\\ \n \t right? " "#), @r###"
     [
-        ItemLet(
+        Let(
             Nonrecursive,
             "s",
             Constant(
@@ -899,7 +892,7 @@ fn test_string() {
 fn test_variant() {
     insta::assert_debug_snapshot!(parse(r#"let a = Apple({}, "hi", Sweet(wow), Blue)"#), @r###"
     [
-        ItemLet(
+        Let(
             Nonrecursive,
             "a",
             Variant(
@@ -937,7 +930,7 @@ fn test_variant() {
 fn test_match() {
     insta::assert_debug_snapshot!(parse("let a = match b {}"), @r###"
     [
-        ItemLet(
+        Let(
             Nonrecursive,
             "a",
             Match(
@@ -952,7 +945,7 @@ fn test_match() {
     "###);
     insta::assert_debug_snapshot!(parse("let a = match b { x -> {:} , Nice({ this: a }) -> {:} }"), @r###"
     [
-        ItemLet(
+        Let(
             Nonrecursive,
             "a",
             Match(
@@ -1000,7 +993,7 @@ fn test_match() {
 fn test_comment() {
     insta::assert_debug_snapshot!(parse("let fst = |x, /* 2 \"hithere\" */ y| x "), @r###"
     [
-        ItemLet(
+        Let(
             Nonrecursive,
             "fst",
             Lambda(
@@ -1026,7 +1019,7 @@ fn test_comment() {
 fn test_lambda() {
     insta::assert_debug_snapshot!(parse("let fst = |x, y| x "), @r###"
     [
-        ItemLet(
+        Let(
             Nonrecursive,
             "fst",
             Lambda(
@@ -1052,7 +1045,7 @@ fn test_lambda() {
 fn test_apply() {
     insta::assert_debug_snapshot!(parse("let a = x(y).test({:}, Test)"), @r###"
     [
-        ItemLet(
+        Let(
             Nonrecursive,
             "a",
             Apply(
@@ -1100,7 +1093,7 @@ fn test_block() {
     );
     insta::assert_debug_snapshot!(parsed, @r###"
     [
-        ItemLet(
+        Let(
             Nonrecursive,
             "a",
             Lambda(

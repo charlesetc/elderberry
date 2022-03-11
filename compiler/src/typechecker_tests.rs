@@ -1,11 +1,19 @@
 use crate::parser::*;
 use crate::typechecker::*;
 use crate::types::*;
+use std::rc::Rc;
 
 #[allow(dead_code)]
-fn test(source: &str) -> AstType {
+fn test(source: &str) -> Rc<AstType> {
     let ast = parse(source);
-    typecheck(ast)
+    let signature = typecheck_modules(ast);
+    let item = signature.borrow().iter().last().unwrap().1.clone();
+    match item {
+        ItemType::Let(ast_type) => ast_type.clone(),
+        ItemType::Module(_) | ItemType::QualifiedImport(_) => {
+            panic!("these tests all should have a final let statement to typecheck")
+        }
+    }
 }
 
 #[test]

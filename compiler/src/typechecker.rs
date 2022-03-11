@@ -1,12 +1,14 @@
 use crate::ast::*;
 use crate::types::{
-    unique_name, AstType, ConcreteType, MaybeQuantified, Primitive, SimpleType, VariableStates,
+    unique_name, AstType, ConcreteType, ItemType, MaybeQuantified, Primitive, Signature,
+    SimpleType, VariableStates,
 };
 use im::OrdMap as ImMap;
 use im::OrdSet as ImSet;
 use std::cell::RefCell;
 use std::collections::BTreeMap as MutMap;
 use std::collections::BTreeSet as MutSet;
+use std::collections::VecDeque;
 use std::rc::Rc;
 use RecFlag::*;
 
@@ -642,8 +644,6 @@ fn typecheck_expr(
     simple_type
 }
 
-pub struct PolymorphicType(Rc<SimpleType>);
-
 fn freshen_concrete_type(
     c: Rc<ConcreteType>,
     variable_states: Rc<RefCell<VariableStates>>,
@@ -752,6 +752,9 @@ fn freshen_simple_type(
         ))),
     }
 }
+
+#[derive(Debug, Clone)]
+pub struct PolymorphicType(Rc<SimpleType>);
 
 impl MaybeQuantified for PolymorphicType {
     fn instantiate(self: Rc<Self>, variable_states: Rc<RefCell<VariableStates>>) -> Rc<SimpleType> {
@@ -967,38 +970,164 @@ fn coalesce_simple_type(
     )
 }
 
-pub fn typecheck(items: Program) -> AstType {
-    let mut var_ctx = ImMap::new();
-    let variable_states = Rc::new(RefCell::new(VariableStates::new()));
-    let (toplevel_modules, toplevel_lets): (Vec<Item>, Vec<Item>) =
-        items.into_iter().partition(|item| match item {
-            Item::ModuleItem(module_item) => true,
-            Item::ItemLet(_, _, _) => false,
-        });
-    let last_type = toplevel_lets
-        .into_iter()
-        .map(|item| match item {
-            Item::ItemLet(Nonrecursive, name, expr) => {
-                let expr_type = typecheck_expr(&expr, &var_ctx, variable_states.clone());
-                let ptype = PolymorphicType(expr_type.clone());
-                var_ctx.insert(name.clone(), Rc::new(ptype));
-                expr_type
+fn get_inner_signature(
+    signature: Signature<PolymorphicType>,
+    mut path: VecDeque<VarName>,
+) -> Signature<PolymorphicType> {
+    match path.remove(0) {
+        Some(name) => match signature.borrow().iter().find(|(name2, _)| name2 == &name) {
+            Some((_, ItemType::Module(signature))) => get_inner_signature(signature.clone(), path),
+            Some((_, ItemType::Let(_))) => {
+                panic!("bug: should not be able to index into modules to get let statements")
             }
-            Item::ItemLet(Recursive, name, expr) => {
-                let name_type = variable_states.borrow_mut().fresh_var();
-                var_ctx.insert(name.clone(), name_type.clone());
-                let expr_type = typecheck_expr(&expr, &var_ctx, variable_states.clone());
-                constrain(expr_type.clone(), name_type, variable_states.clone());
+            Some((_, ItemType::QualifiedImport(_))) => {
+                unimplemented!()
+            }
+            None => {
+                panic!("tried to get module {:?}, but no module was found", path,)
+            }
+        },
+        None => signature,
+    }
+}
 
-                let ptype = PolymorphicType(expr_type.clone());
-                var_ctx.insert(name.clone(), Rc::new(ptype));
-                expr_type
+fn new_signature<T>() -> Signature<T> {
+    Rc::new(RefCell::new(vec![]))
+}
+
+fn typecheck_item(
+    var_ctx: Rc<RefCell<ImMap<String, Rc<dyn MaybeQuantified>>>>,
+    variable_states: Rc<RefCell<VariableStates>>,
+    module_ctx: Signature<PolymorphicType>,
+    path: &Vec<VarName>,
+    item: &Item,
+) {
+    // The .clone() here might be removable
+    let my_module = get_inner_signature(module_ctx.clone(), VecDeque::from(path.clone()));
+    match item {
+        Item::Let(Nonrecursive, name, expr) => {
+            let expr_type = typecheck_expr(expr, &var_ctx.borrow(), variable_states);
+            let ptype = PolymorphicType(expr_type);
+            // Maybe this should just be dyn MaybeQuantified not Rc<dyn MaybeQuantified>
+            var_ctx
+                .borrow_mut()
+                .insert(name.clone(), Rc::new(ptype.clone()));
+            my_module
+                .borrow_mut()
+                .push((name.clone(), ItemType::Let(ptype)));
+        }
+        Item::Let(Recursive, name, expr) => {
+            let name_type = variable_states.borrow_mut().fresh_var();
+            var_ctx.borrow_mut().insert(name.clone(), name_type.clone());
+            let expr_type = typecheck_expr(expr, &var_ctx.borrow(), variable_states.clone());
+            constrain(expr_type.clone(), name_type, variable_states);
+            let ptype = PolymorphicType(expr_type);
+            var_ctx
+                .borrow_mut()
+                .insert(name.clone(), Rc::new(ptype.clone()));
+            my_module
+                .borrow_mut()
+                .push((name.clone(), ItemType::Let(ptype)));
+        }
+        Item::QualifiedImport(import_path, name) => {
+            my_module
+                .borrow_mut()
+                .push((name.clone(), ItemType::QualifiedImport(import_path.clone())));
+        }
+        Item::Module(name, items) => {
+            let var_ctx = Rc::new(RefCell::new(var_ctx.borrow().clone()));
+            my_module
+                .borrow_mut()
+                .push((name.clone(), ItemType::Module(new_signature())));
+            let mut path = path.clone();
+            path.push(name.clone());
+            for item in items {
+                typecheck_item(
+                    var_ctx.clone(),
+                    variable_states.clone(),
+                    module_ctx.clone(),
+                    &path,
+                    item,
+                );
             }
-            _ => unimplemented!(),
+        }
+    }
+}
+
+fn coalesce_signature(
+    signature: Signature<PolymorphicType>,
+    variable_states: Rc<RefCell<VariableStates>>,
+) -> Signature<Rc<AstType>> {
+    // This is probably a pretty slow function
+    let signature = signature
+        .borrow()
+        .iter()
+        .filter_map(|(name, item)| {
+            match item {
+                ItemType::Module(signature) => Some((
+                    name.clone(),
+                    ItemType::Module(coalesce_signature(
+                        signature.clone(),
+                        variable_states.clone(),
+                    )),
+                )),
+                ItemType::Let(pexpr) => Some((
+                    name.clone(),
+                    ItemType::Let(Rc::new(coalesce_simple_type(
+                        pexpr.0.clone(),
+                        variable_states.clone(),
+                    ))),
+                )),
+                ItemType::QualifiedImport(_) => None, // we don't need these in our ast signature
+            }
         })
-        .last()
-        .unwrap();
-    let x = coalesce_simple_type(last_type, variable_states.clone());
-    // println!("VARIABLE STATES {:#?}", variable_states);
-    x.simplify()
+        .collect();
+    Rc::new(RefCell::new(signature))
+}
+
+fn simplify_signature(signature: Signature<Rc<AstType>>) -> Signature<Rc<AstType>> {
+    let signature = signature
+        .borrow()
+        .iter()
+        .map(|(name, item)| {
+            let item = match item {
+                ItemType::Module(signature) => {
+                    ItemType::Module(simplify_signature(signature.clone()))
+                }
+                ItemType::Let(ast_type) => ItemType::Let(Rc::new(ast_type.simplify())),
+                ItemType::QualifiedImport(_) => {
+                    panic!("bug: These should be filtered out in [coalesce_signature]")
+                }
+            };
+            (name.clone(), item)
+        })
+        .collect();
+    Rc::new(RefCell::new(signature))
+}
+
+pub fn typecheck_modules(items: Program) -> Signature<Rc<AstType>> {
+    let var_ctx = Rc::new(RefCell::new(ImMap::new()));
+    let variable_states = Rc::new(RefCell::new(VariableStates::new()));
+    let module_ctx = new_signature();
+
+    // Choice for the initial version: Only evaluate modules in a lexical, top-to-bottom, way.
+    // This saves time and maybe is good enough since the editor can perform a topological sort when
+    // writing out to disk.
+
+    // The reason we evaluate all toplevel let statements later is just because the tests are easier that way.
+    // At some point, I should refactor to have a function for getting a simple type from an expression instead of a Program
+    // and then convert most of the tests to use that. TODO: Eventually, we should remove toplevel lets outside of modules.
+    for item in items.iter() {
+        typecheck_item(
+            var_ctx.clone(),
+            variable_states.clone(),
+            module_ctx.clone(),
+            &vec![],
+            item,
+        );
+    }
+
+    let signature = coalesce_signature(module_ctx, variable_states.clone());
+    let signature = simplify_signature(signature);
+    signature
 }

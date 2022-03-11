@@ -1,3 +1,12 @@
+module Test {
+	let id = |x| x
+}
+
+let a = Test.id(2)
+
+let b = Test.id(3)
+
+/*
 let map = |o, f| {
 	match o {
 		None -> None,
@@ -6,6 +15,7 @@ let map = |o, f| {
 }
 
 let z = map(Some("hi"), |x| 2)
+*/
 
 /* 
 let z = |x| if x { x } else { x }
