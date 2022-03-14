@@ -1,10 +1,26 @@
-module Test {
-	let id = |x| x
+module A {
+    module B {
+        module C {
+            let foo = 2
+        }
+    }
+    module X {
+        module Y { 
+            let bar = B.C.foo
+        }
+    }
 }
 
-let a = Test.id(2)
+let baz = A.X.Y.bar
 
-let b = Test.id(3)
+
+/* module Test {
+	let choose = |x| if x 2 else 3 
+}
+
+import Test as Wow
+
+let a = |x| Wow.choose(x) */ 
 
 /*
 let map = |o, f| {

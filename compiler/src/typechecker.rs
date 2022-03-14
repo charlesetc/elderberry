@@ -434,32 +434,52 @@ fn typecheck_statements(
     statements: &Statements,
     var_ctx: &ImMap<String, Rc<dyn MaybeQuantified>>,
     variable_states: Rc<RefCell<VariableStates>>,
+    module_ctx: Signature<Rc<PolymorphicType>>,
+    module_path: &Vec<VarName>,
 ) -> Rc<SimpleType> {
     use Statements::*;
     match statements {
         Empty => primitive_simple_type(Primitive::Unit),
         Sequence(expr, rest) => {
-            let expr_type = typecheck_expr(expr, var_ctx, variable_states.clone());
+            let expr_type = typecheck_expr(
+                expr,
+                var_ctx,
+                variable_states.clone(),
+                module_ctx.clone(),
+                module_path,
+            );
             match &**rest {
                 Empty => expr_type,
-                _ => typecheck_statements(rest, var_ctx, variable_states),
+                _ => typecheck_statements(rest, var_ctx, variable_states, module_ctx, module_path),
             }
         }
         Let(Nonrecursive, name, expr, rest) => {
-            let expr_type = typecheck_expr(expr, var_ctx, variable_states.clone());
+            let expr_type = typecheck_expr(
+                expr,
+                var_ctx,
+                variable_states.clone(),
+                module_ctx.clone(),
+                module_path,
+            );
             let var_ctx = var_ctx.update(name.clone(), expr_type);
-            typecheck_statements(rest, &var_ctx, variable_states)
+            typecheck_statements(rest, &var_ctx, variable_states, module_ctx, module_path)
         }
         Let(Recursive, name, expr, rest) => {
             // TODO: Maybe only allow this for functions?
             let name_type = variable_states.borrow_mut().fresh_var();
             let var_ctx = var_ctx.update(name.clone(), name_type.clone());
             constrain(
-                typecheck_expr(expr, &var_ctx, variable_states.clone()),
+                typecheck_expr(
+                    expr,
+                    &var_ctx,
+                    variable_states.clone(),
+                    module_ctx.clone(),
+                    module_path,
+                ),
                 name_type,
                 variable_states.clone(),
             );
-            typecheck_statements(rest, &var_ctx, variable_states)
+            typecheck_statements(rest, &var_ctx, variable_states, module_ctx, module_path)
         }
     }
 }
@@ -525,10 +545,115 @@ fn typecheck_pattern(
     }
 }
 
+enum IndexResult {
+    Done(Signature<Rc<PolymorphicType>>),
+    Alias(Vec<VarName>),
+    NotFound,
+}
+
+fn index_into_item(
+    item: ItemType<Rc<PolymorphicType>>,
+    lookup_path: &mut VecDeque<VarName>,
+) -> IndexResult {
+    use IndexResult::*;
+
+    match item {
+        ItemType::Let(_) => {
+            panic!("bug: Module paths shouldn't be able to reference let statements!")
+        }
+        ItemType::QualifiedImport(path) => Alias(path),
+        ItemType::Module(signature) => match lookup_path.pop_front() {
+            None => Done(signature),
+            Some(lookup_name) => {
+                for (item_name, item) in signature.borrow().iter() {
+                    if item_name == &lookup_name {
+                        return index_into_item(item.clone(), lookup_path);
+                    }
+                }
+                NotFound
+            }
+        },
+    }
+}
+
+#[derive(Debug)]
+struct ModuleSeeker {
+    current_path: VecDeque<VarName>,
+    lookup_path: VecDeque<VarName>,
+    toplevel_module: Signature<Rc<PolymorphicType>>,
+}
+
+impl ModuleSeeker {
+    fn seek(&mut self) -> Signature<Rc<PolymorphicType>> {
+        use IndexResult::*;
+        let current_module = match index_into_item(
+            ItemType::Module(self.toplevel_module.clone()),
+            &mut self.current_path.clone(),
+        ) {
+            Done(item) => item,
+            Alias(_) | NotFound => {
+                panic!("bug: the current path should only ever point to a module")
+            }
+        };
+        let mut new_lookup_path = self.lookup_path.clone();
+        match index_into_item(ItemType::Module(current_module), &mut new_lookup_path) {
+            Done(signature) => signature,
+            NotFound => match self.current_path.pop_back() {
+                None => panic!(
+                    "tried to get module {:?}, but no module was found",
+                    self.lookup_path
+                ),
+                Some(_) => self.seek(),
+            },
+            Alias(path) => {
+                // add the path in place of the name of the alias - this has already been removed by [index_into_item]
+                for name in path.into_iter().rev() {
+                    new_lookup_path.push_front(name);
+                }
+                self.lookup_path = new_lookup_path;
+                self.current_path.pop_back();
+                self.seek()
+            }
+        }
+    }
+}
+
+fn get_signature_at_path(
+    toplevel_module: Signature<Rc<PolymorphicType>>,
+    current_path: VecDeque<VarName>,
+    lookup_path: VecDeque<VarName>,
+) -> Signature<Rc<PolymorphicType>> {
+    let mut seeker = ModuleSeeker {
+        toplevel_module,
+        current_path,
+        lookup_path,
+    };
+    seeker.seek()
+}
+
+fn get_value_in_signature(
+    current_module: Signature<Rc<PolymorphicType>>,
+    name: &VarName,
+) -> Rc<PolymorphicType> {
+    for (item_name, item) in current_module.borrow().iter() {
+        if name == item_name {
+            match item {
+                ItemType::Let(ptype) => return ptype.clone(),
+                ItemType::QualifiedImport(_) | ItemType::Module(_) => {
+                    panic!("bug: module names and variable names should be separate")
+                }
+            }
+        }
+    }
+    panic!("module doesn't have item {}", name)
+}
+
 fn typecheck_expr(
     expr: &Expr,
     var_ctx: &ImMap<String, Rc<dyn MaybeQuantified>>,
     variable_states: Rc<RefCell<VariableStates>>,
+    module_ctx: Signature<Rc<PolymorphicType>>,
+    module_path: &Vec<VarName>,
 ) -> Rc<SimpleType> {
     use Expr::*;
     let simple_type = match expr {
@@ -537,7 +662,14 @@ fn typecheck_expr(
             Some(maybe_quantified) => maybe_quantified.clone().instantiate(variable_states),
             None => type_error(format!("variable \"{}\" not found", name)),
         },
-        Var(Some(_path), _name) => unimplemented!(),
+        Var(Some(lookup_path), name) => {
+            let signature_at_path = get_signature_at_path(
+                module_ctx,
+                VecDeque::from(module_path.clone()),
+                VecDeque::from(lookup_path.clone()),
+            );
+            get_value_in_signature(signature_at_path, name).instantiate(variable_states)
+        }
         Lambda(args, expr) => {
             let (arg_types, var_ctx) = {
                 let mut arg_types = vec![];
@@ -551,21 +683,29 @@ fn typecheck_expr(
             };
             Rc::new(SimpleType::Concrete(Rc::new(ConcreteType::Function(
                 arg_types,
-                typecheck_expr(expr, &var_ctx, variable_states),
+                typecheck_expr(expr, &var_ctx, variable_states, module_ctx, module_path),
             ))))
         }
         Apply(f, args) => {
             let return_type = variable_states.borrow_mut().fresh_var();
             let arg_types = args
                 .iter()
-                .map(|arg| typecheck_expr(arg, var_ctx, variable_states.clone()))
+                .map(|arg| {
+                    typecheck_expr(
+                        arg,
+                        var_ctx,
+                        variable_states.clone(),
+                        module_ctx.clone(),
+                        module_path,
+                    )
+                })
                 .collect::<Vec<_>>();
             let f_type = Rc::new(SimpleType::Concrete(Rc::new(ConcreteType::Function(
                 arg_types,
                 return_type.clone(),
             ))));
             constrain(
-                typecheck_expr(f, var_ctx, variable_states.clone()),
+                typecheck_expr(f, var_ctx, variable_states.clone(), module_ctx, module_path),
                 f_type,
                 variable_states,
             );
@@ -577,7 +717,13 @@ fn typecheck_expr(
                 .map(|(name, expr)| {
                     (
                         name.clone(),
-                        typecheck_expr(expr, &var_ctx, variable_states.clone()),
+                        typecheck_expr(
+                            expr,
+                            &var_ctx,
+                            variable_states.clone(),
+                            module_ctx.clone(),
+                            module_path,
+                        ),
                     )
                 })
                 .collect::<ImMap<_, _>>(),
@@ -585,7 +731,13 @@ fn typecheck_expr(
         FieldAccess(expr, name) => {
             let return_type = variable_states.borrow_mut().fresh_var();
             constrain(
-                typecheck_expr(expr, var_ctx, variable_states.clone()),
+                typecheck_expr(
+                    expr,
+                    var_ctx,
+                    variable_states.clone(),
+                    module_ctx,
+                    module_path,
+                ),
                 Rc::new(SimpleType::Concrete(Rc::new(ConcreteType::Record(
                     im::ordmap! {name.clone() => return_type.clone()},
                 )))),
@@ -593,20 +745,42 @@ fn typecheck_expr(
             );
             return_type
         }
-        Block(statements) => typecheck_statements(statements, &var_ctx, variable_states),
+        Block(statements) => typecheck_statements(
+            statements,
+            &var_ctx,
+            variable_states,
+            module_ctx,
+            module_path,
+        ),
         If(condition, true_branch, false_branch) => {
-            let condition_type = typecheck_expr(condition, &var_ctx, variable_states.clone());
+            let condition_type = typecheck_expr(
+                condition,
+                &var_ctx,
+                variable_states.clone(),
+                module_ctx.clone(),
+                module_path,
+            );
             constrain(
                 condition_type,
                 primitive_simple_type(Primitive::Bool),
                 variable_states.clone(),
             );
             let return_type = variable_states.borrow_mut().fresh_var();
-            let true_branch_type = typecheck_expr(true_branch, &var_ctx, variable_states.clone());
+            let true_branch_type = typecheck_expr(
+                true_branch,
+                &var_ctx,
+                variable_states.clone(),
+                module_ctx.clone(),
+                module_path,
+            );
             let false_branch_type = match false_branch {
-                Some(false_branch) => {
-                    typecheck_expr(false_branch, &var_ctx, variable_states.clone())
-                }
+                Some(false_branch) => typecheck_expr(
+                    false_branch,
+                    &var_ctx,
+                    variable_states.clone(),
+                    module_ctx,
+                    module_path,
+                ),
                 None => primitive_simple_type(Primitive::Unit),
             };
             constrain(
@@ -619,12 +793,24 @@ fn typecheck_expr(
         }
         Match(expr, branches) => {
             let return_type = variable_states.borrow_mut().fresh_var();
-            let expr_type = typecheck_expr(expr, var_ctx, variable_states.clone());
+            let expr_type = typecheck_expr(
+                expr,
+                var_ctx,
+                variable_states.clone(),
+                module_ctx.clone(),
+                module_path,
+            );
             for (pattern, branch_expr) in branches.iter() {
                 let (pattern_type, var_ctx) =
                     typecheck_pattern(pattern, var_ctx, variable_states.clone());
                 constrain(expr_type.clone(), pattern_type, variable_states.clone());
-                let branch_type = typecheck_expr(branch_expr, &var_ctx, variable_states.clone());
+                let branch_type = typecheck_expr(
+                    branch_expr,
+                    &var_ctx,
+                    variable_states.clone(),
+                    module_ctx.clone(),
+                    module_path,
+                );
                 constrain(branch_type, return_type.clone(), variable_states.clone());
             }
             return_type
@@ -632,7 +818,15 @@ fn typecheck_expr(
         Variant(name, args) => {
             let arg_types = args
                 .iter()
-                .map(|arg| typecheck_expr(arg, var_ctx, variable_states.clone()))
+                .map(|arg| {
+                    typecheck_expr(
+                        arg,
+                        var_ctx,
+                        variable_states.clone(),
+                        module_ctx.clone(),
+                        module_path,
+                    )
+                })
                 .collect();
             Rc::new(SimpleType::Concrete(Rc::new(ConcreteType::Variant(
                 im::ordmap! {name.clone() => arg_types},
@@ -970,48 +1164,35 @@ fn coalesce_simple_type(
     )
 }
 
-fn get_inner_signature(
-    signature: Signature<PolymorphicType>,
-    mut path: VecDeque<VarName>,
-) -> Signature<PolymorphicType> {
-    match path.remove(0) {
-        Some(name) => match signature.borrow().iter().find(|(name2, _)| name2 == &name) {
-            Some((_, ItemType::Module(signature))) => get_inner_signature(signature.clone(), path),
-            Some((_, ItemType::Let(_))) => {
-                panic!("bug: should not be able to index into modules to get let statements")
-            }
-            Some((_, ItemType::QualifiedImport(_))) => {
-                unimplemented!()
-            }
-            None => {
-                panic!("tried to get module {:?}, but no module was found", path,)
-            }
-        },
-        None => signature,
-    }
-}
-
-fn new_signature<T>() -> Signature<T> {
+fn new_signature<T>() -> Signature<Rc<T>> {
     Rc::new(RefCell::new(vec![]))
 }
 
 fn typecheck_item(
     var_ctx: Rc<RefCell<ImMap<String, Rc<dyn MaybeQuantified>>>>,
     variable_states: Rc<RefCell<VariableStates>>,
-    module_ctx: Signature<PolymorphicType>,
+    module_ctx: Signature<Rc<PolymorphicType>>,
     path: &Vec<VarName>,
     item: &Item,
 ) {
+    use IndexResult::*;
     // The .clone() here might be removable
-    let my_module = get_inner_signature(module_ctx.clone(), VecDeque::from(path.clone()));
+    let my_module = match index_into_item(
+        ItemType::Module(module_ctx.clone()),
+        &mut VecDeque::from(path.clone()),
+    ) {
+        Done(signature) => signature,
+        Alias(_) | NotFound => {
+            panic!("bug: path should always point to modules")
+        }
+    };
     match item {
         Item::Let(Nonrecursive, name, expr) => {
-            let expr_type = typecheck_expr(expr, &var_ctx.borrow(), variable_states);
-            let ptype = PolymorphicType(expr_type);
+            let expr_type =
+                typecheck_expr(expr, &var_ctx.borrow(), variable_states, module_ctx, path);
+            let ptype = Rc::new(PolymorphicType(expr_type));
             // Maybe this should just be dyn MaybeQuantified not Rc<dyn MaybeQuantified>
-            var_ctx
-                .borrow_mut()
-                .insert(name.clone(), Rc::new(ptype.clone()));
+            var_ctx.borrow_mut().insert(name.clone(), ptype.clone());
             my_module
                 .borrow_mut()
                 .push((name.clone(), ItemType::Let(ptype)));
@@ -1019,12 +1200,16 @@ fn typecheck_item(
         Item::Let(Recursive, name, expr) => {
             let name_type = variable_states.borrow_mut().fresh_var();
             var_ctx.borrow_mut().insert(name.clone(), name_type.clone());
-            let expr_type = typecheck_expr(expr, &var_ctx.borrow(), variable_states.clone());
+            let expr_type = typecheck_expr(
+                expr,
+                &var_ctx.borrow(),
+                variable_states.clone(),
+                module_ctx,
+                path,
+            );
             constrain(expr_type.clone(), name_type, variable_states);
-            let ptype = PolymorphicType(expr_type);
-            var_ctx
-                .borrow_mut()
-                .insert(name.clone(), Rc::new(ptype.clone()));
+            let ptype = Rc::new(PolymorphicType(expr_type));
+            var_ctx.borrow_mut().insert(name.clone(), ptype.clone());
             my_module
                 .borrow_mut()
                 .push((name.clone(), ItemType::Let(ptype)));
@@ -1055,7 +1240,7 @@ fn typecheck_item(
 }
 
 fn coalesce_signature(
-    signature: Signature<PolymorphicType>,
+    signature: Signature<Rc<PolymorphicType>>,
     variable_states: Rc<RefCell<VariableStates>>,
 ) -> Signature<Rc<AstType>> {
     // This is probably a pretty slow function

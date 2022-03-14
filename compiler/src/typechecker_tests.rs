@@ -501,3 +501,55 @@ fn test_match_and_apply() {
     )
     "###);
 }
+
+#[test]
+fn test_module_indirection() {
+    insta::assert_debug_snapshot!(test("
+        module A {
+            module B {
+                    let foo = 2
+            }
+        }
+
+        let bar = A.B.foo
+        "), @r###"
+    Primitive(
+        Int,
+    )
+    "###);
+    insta::assert_debug_snapshot!(test("
+        module A {
+            module B {
+                    let foo = 2
+            }
+        }
+
+        import A.B as C
+
+        let bar = C.foo
+        "), @r###"
+    Primitive(
+        Int,
+    )
+    "###);
+    insta::assert_debug_snapshot!(test("
+        module A {
+            module B {
+                module C {
+                    let foo = 2
+                }
+            }
+            module X {
+                module Y { 
+                    let bar = B.C.foo
+                }
+            }
+        }
+
+        let baz = A.X.Y.bar
+        "), @r###"
+    Primitive(
+        Int,
+    )
+    "###);
+}
