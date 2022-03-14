@@ -552,4 +552,29 @@ fn test_module_indirection() {
         Int,
     )
     "###);
+    insta::assert_debug_snapshot!(test("
+        module A {
+            module A {
+                module A {
+                    let foo = 2
+                }
+            }
+            module A {
+                module A { 
+                    let bar = A.A.foo
+                }
+            }
+            import A.A as A
+
+            module A {
+                let bar = A.bar 
+            }
+        }
+
+        let baz = A.A.bar
+        "), @r###"
+    Primitive(
+        Int,
+    )
+    "###);
 }
