@@ -670,6 +670,10 @@ fn typecheck_expr(
             );
             get_value_in_signature(signature_at_path, name).instantiate(variable_states)
         }
+        JsVar(_name) => {
+            let var = variable_states.borrow_mut().fresh_var();
+            var
+        }
         Lambda(args, expr) => {
             let (arg_types, var_ctx) = {
                 let mut arg_types = vec![];

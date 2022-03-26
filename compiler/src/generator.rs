@@ -132,6 +132,7 @@ fn generate_expr(out: &mut String, expr: &Expr) {
         }
         Expr::Var(None, x) => out.push_str(&x),
         Expr::Var(Some(_), _) => unimplemented!(),
+        Expr::JsVar(name) => out.push_str(name),
         Expr::Record(fields) => {
             out.push_str("{");
             for (name, expr) in fields {
@@ -214,7 +215,7 @@ fn generate_expr(out: &mut String, expr: &Expr) {
                 None => generate_unit(out),
             }
             out.push_str(";");
-            out.push_str("})()");
+            out.push_str("}})()");
         }
         Expr::Match(matched_expr, branches) => {
             out.push_str("(() => {");

@@ -128,6 +128,9 @@ enum Token {
     #[regex("(_|[a-z])(_|[a-zA-Z])*", |lex| lex.slice().parse())]
     LowerVar(String),
 
+    #[regex("@(_|[a-z])(_|[a-zA-Z])*", |lex| lex.slice().parse())]
+    JsVar(String),
+
     #[regex("[A-Z][a-zA-Z]*", |lex| lex.slice().parse())]
     CapitalVar(String),
 
@@ -509,6 +512,12 @@ fn parse_expression_without_operators(tokens: &mut &[TokenWithSpan]) -> Expr {
         }
         [(Token::CapitalVar(_), _), (Token::Dot, _), ..] => {
             parse_module_ident_path(tokens)
+        }
+        [(Token::JsVar(name), _), rest @ .. ] => {
+            *tokens = rest;
+            let mut name = name.to_string();
+            name.remove(0);
+            Expr::JsVar(name)
         }
         [(Token::CapitalVar(name), _), rest @ ..] => {
             *tokens = rest;

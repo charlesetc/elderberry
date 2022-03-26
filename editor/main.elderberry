@@ -1,0 +1,7 @@
+let x = false
+
+let print = @console.log
+
+let y = if x { print("wow okay") } else { print(2) }
+
+let a = @console.log("hi there")

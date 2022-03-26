@@ -49,6 +49,7 @@ pub enum Expr {
     Apply(Box<Expr>, Vec<Expr>),
     Block(Statements),
     Var(Option<ModulePath>, VarName),
+    JsVar(VarName),
     If(Box<Expr>, Box<Expr>, Option<Box<Expr>>),
 }
 

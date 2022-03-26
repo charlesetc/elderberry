@@ -2,5 +2,5 @@ let snd = |x, y| y
 
 let main = {
 	let x = 2;
-	snd({foo: {}}, Apple(a, b, c))
+	snd({foo: {}}, Apple(x, x, x))
 }
