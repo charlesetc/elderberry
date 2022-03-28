@@ -12,4 +12,7 @@ let y = (() => {
         })();
     }
 })();
-let a = (console).log("hi there", );
+let main = (() => {
+    print(parseInt("23", ), );
+    return print(23, )
+})();
