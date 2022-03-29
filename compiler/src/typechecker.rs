@@ -506,7 +506,6 @@ fn typecheck_statements(
             )
         }
         Let(Recursive, name, expr, rest) => {
-            // TODO: Maybe only allow this for functions?
             let name_type = variable_states.borrow_mut().fresh_var();
             let var_ctx = var_ctx.update(name.clone(), name_type.clone());
             constrain(
@@ -1385,8 +1384,22 @@ fn typecheck_item(
                     _ => panic!("methods must be defined on variants"),
                 }
             }
-            // TODO: have to keep track of whether I'm within a method definition when evaluating an expression
-            // so that we can generalize when we're out of one.
+            // TODO: have to keep track of whether I'm within a method
+            // definition when evaluating an expression so that we can
+            // generalize when we're out of one.
+
+            // There is a major problem with the above code:
+            // - We don't know what methods are defined for a variant while typechecking a variant
+            // - and this method *could* be one of the methods defined for said variant.
+            //
+            // as much as I would like to support the ability to match on
+            // several variants while defining a single method, I guess it
+            // doesn't add that much initially - we can add it later, and
+
+            // TODO: We'll have to do a pass ahead of time which gets all the
+            // methods for a variant and assigns them a simple type of a type
+            // variable. then we can constrain each method's type variable as
+            // we evaluate it's definition.
         }
     }
 }
