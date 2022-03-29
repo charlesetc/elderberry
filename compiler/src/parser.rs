@@ -53,6 +53,9 @@ enum Token {
     #[token("let")]
     Let,
 
+    #[token("method")]
+    Method,
+
     #[token("rec")]
     Rec,
 
@@ -693,6 +696,14 @@ fn parse_item(tokens: &mut &[TokenWithSpan]) -> Option<Item> {
             *tokens = rest;
             let expr = parse_expression(tokens);
             Some(Item::Let(Recursive, name.to_string(), expr))
+        }
+        [(Token::Method, _), (Token::LowerVar(method_name), _), rest @ ..] => {
+            *tokens = rest;
+            expect_and_consume(tokens, Token::OpenParen);
+            let args = parse_comma_separated_patterns(tokens, Token::CloseParen);
+            // TODO: parse an equals sign or assert a curley brace
+            let expr = parse_expression(tokens);
+            Some(Item::Method(method_name.to_string(), args, expr))
         }
         _ => expected("import, let statement, or module definition", 5, tokens),
     }

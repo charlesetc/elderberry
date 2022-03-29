@@ -281,6 +281,7 @@ fn generate_toplevel_item(out: &mut String, item: &Item) {
         Item::Let(Recursive, _, _) => {
             unimplemented!()
         }
+        Item::Method(_, _, _) => unimplemented!(),
     }
 }
 

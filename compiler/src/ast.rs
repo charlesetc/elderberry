@@ -58,6 +58,7 @@ pub enum Item {
     Module(VarName, Vec<Item>),
     QualifiedImport(Vec<VarName>, VarName),
     Let(RecFlag, VarName, Expr),
+    Method(VarName, Vec<Pattern>, Expr),
 }
 
 impl Item {
@@ -66,6 +67,7 @@ impl Item {
             Item::Module(name, _) => name,
             Item::QualifiedImport(_, name) => name,
             Item::Let(_, name, _) => name,
+            Item::Method(_, _, _) => unimplemented!(),
         }
     }
 }
