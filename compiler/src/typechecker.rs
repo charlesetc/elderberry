@@ -1,7 +1,7 @@
 use crate::ast::*;
 use crate::types::{
-    unique_name, AstType, ConcreteType, ItemType, MaybeQuantified, Primitive, Signature,
-    SimpleType, VariableStates,
+    unique_name, AstType, ConcreteType, Fields, ItemType, MaybeQuantified, Primitive, Signature,
+    SimpleType, VariableStates, VariantType,
 };
 use im::OrdMap as ImMap;
 use im::OrdSet as ImSet;
@@ -76,6 +76,31 @@ fn unify_and_replace(
     a.clone()
 }
 
+fn greatest_lower_bound_for_fields(
+    a_fields: &Fields,
+    b_fields: &Fields,
+    variable_states: Rc<RefCell<VariableStates>>,
+    cache: ConstraintCache,
+) -> Fields {
+    let all_keys: ImSet<String> = a_fields.keys().chain(b_fields.keys()).collect();
+    all_keys
+        .into_iter()
+        .map(|key| {
+            let value = match (a_fields.get(&key), b_fields.get(&key)) {
+                (None, None) => panic!("bug: at least one of these should have each key"),
+                (None, Some(value)) | (Some(value), None) => value.clone(),
+                (Some(a_value), Some(b_value)) => least_upper_bound(
+                    a_value.clone(),
+                    b_value.clone(),
+                    variable_states.clone(),
+                    cache.clone(),
+                ),
+            };
+            (key, value)
+        })
+        .collect()
+}
+
 fn greatest_lower_bound_concrete(
     a: Rc<ConcreteType>,
     b: Rc<ConcreteType>,
@@ -114,7 +139,7 @@ fn greatest_lower_bound_concrete(
                     let value = match (a_variants.get(&key), b_variants.get(&key)) {
                         (None, None) => panic!("bug: at least one of these should have each key"),
                         (None, Some(args)) | (Some(args), None) => args.clone(),
-                        (Some(a_args), Some(b_args)) => {
+                        (Some(VariantType { args: a_args, fields : a_fields }), Some(VariantType { args : b_args, fields : b_fields})) => {
                             if a_args.len() != b_args.len() {
                                 panic!("variant {} has been used with {} arguments and also {} arguments", key.clone(), a_args.len(), b_args.len())
                             }
@@ -125,7 +150,8 @@ fn greatest_lower_bound_concrete(
                                 let arg = least_upper_bound(a_arg.clone(), b_arg.clone(), variable_states.clone(), cache.clone());
                                 args.push(arg)
                             }
-                            args
+                            let fields = greatest_lower_bound_for_fields(a_fields, b_fields, variable_states.clone(), cache.clone());
+                            VariantType { args: args , fields: fields }
                         }
                     };
                     (key, value)
@@ -134,23 +160,8 @@ fn greatest_lower_bound_concrete(
             Rc::new(Variant(variants))
         }
         (Record(a_fields), Record(b_fields)) => {
-            let all_keys: ImSet<String> = a_fields.keys().chain(b_fields.keys()).collect();
-            let fields = all_keys
-                .into_iter()
-                .map(|key| {
-                    let value = match (a_fields.get(&key), b_fields.get(&key)) {
-                        (None, None) => panic!("bug: at least one of these should have each key"),
-                        (None, Some(value)) | (Some(value), None) => value.clone(),
-                        (Some(a_value), Some(b_value)) => least_upper_bound(
-                            a_value.clone(),
-                            b_value.clone(),
-                            variable_states.clone(),
-                            cache.clone(),
-                        ),
-                    };
-                    (key, value)
-                })
-                .collect();
+            let fields =
+                greatest_lower_bound_for_fields(a_fields, b_fields, variable_states, cache);
             Rc::new(Record(fields))
         }
         _ => panic!(
@@ -158,6 +169,31 @@ fn greatest_lower_bound_concrete(
             a, b
         ),
     }
+}
+
+fn least_upper_bound_for_fields(
+    a_fields: &Fields,
+    b_fields: &Fields,
+    variable_states: Rc<RefCell<VariableStates>>,
+    cache: ConstraintCache,
+) -> Fields {
+    let all_keys: ImSet<String> = a_fields.keys().chain(b_fields.keys()).collect();
+    all_keys
+        .iter()
+        .filter_map(|key| match (a_fields.get(key), b_fields.get(key)) {
+            (None, None) => panic!("at least one of these should have each key"),
+            (None, Some(_)) | (Some(_), None) => None,
+            (Some(a_value), Some(b_value)) => Some((
+                key.clone(),
+                greatest_lower_bound(
+                    a_value.clone(),
+                    b_value.clone(),
+                    variable_states.clone(),
+                    cache.clone(),
+                ),
+            )),
+        })
+        .collect()
 }
 
 fn least_upper_bound_concrete(
@@ -201,7 +237,16 @@ fn least_upper_bound_concrete(
                 .filter_map(|key| match (a_variants.get(&key), b_variants.get(&key)) {
                     (None, None) => panic!("bug: at least one of these should have each key"),
                     (None, Some(args)) | (Some(args), None) => Some((key, args.clone())),
-                    (Some(a_args), Some(b_args)) => {
+                    (
+                        Some(VariantType {
+                            args: a_args,
+                            fields: a_fields,
+                        }),
+                        Some(VariantType {
+                            args: b_args,
+                            fields: b_fields,
+                        }),
+                    ) => {
                         if a_args.len() != b_args.len() {
                             panic!(
                                 "variant {} has been used with {} arguments and also {} arguments",
@@ -222,30 +267,21 @@ fn least_upper_bound_concrete(
                             );
                             args.push(arg)
                         }
-                        Some((key, args))
+                        let fields = least_upper_bound_for_fields(
+                            a_fields,
+                            b_fields,
+                            variable_states.clone(),
+                            cache.clone(),
+                        );
+                        let variant_type = VariantType { args, fields };
+                        Some((key, variant_type))
                     }
                 })
                 .collect();
             Rc::new(Variant(variants))
         }
         (Record(a_fields), Record(b_fields)) => {
-            let all_keys: ImSet<String> = a_fields.keys().chain(b_fields.keys()).collect();
-            let fields = all_keys
-                .iter()
-                .filter_map(|key| match (a_fields.get(key), b_fields.get(key)) {
-                    (None, None) => panic!("at least one of these should have each key"),
-                    (None, Some(_)) | (Some(_), None) => None,
-                    (Some(a_value), Some(b_value)) => Some((
-                        key.clone(),
-                        greatest_lower_bound(
-                            a_value.clone(),
-                            b_value.clone(),
-                            variable_states.clone(),
-                            cache.clone(),
-                        ),
-                    )),
-                })
-                .collect();
+            let fields = least_upper_bound_for_fields(a_fields, b_fields, variable_states, cache);
             Rc::new(Record(fields))
         }
         _ => panic!(
@@ -307,6 +343,25 @@ fn least_upper_bound(
     }
 }
 
+fn constrain_fields(
+    subfields: &Fields,
+    superfields: &Fields,
+    variable_states: Rc<RefCell<VariableStates>>,
+    cache: ConstraintCache,
+) {
+    for (field, supervalue) in superfields.iter() {
+        match subfields.get(field) {
+            Some(subvalue) => constrain_(
+                subvalue.clone(),
+                supervalue.clone(),
+                variable_states.clone(),
+                cache.clone(),
+            ),
+            None => type_error(format!("missing field {}", field)),
+        }
+    }
+}
+
 fn constrain_concrete_types(
     subtype: Rc<ConcreteType>,
     supertype: Rc<ConcreteType>,
@@ -335,40 +390,63 @@ fn constrain_concrete_types(
             }
             constrain_(ret1.clone(), ret2.clone(), variable_states, cache);
         }
-        (Record(fields1), Record(fields2)) => {
-            for (field, value2) in fields2.iter() {
-                match fields1.get(field) {
-                    Some(value1) => constrain_(
-                        value1.clone(),
-                        value2.clone(),
-                        variable_states.clone(),
-                        cache.clone(),
-                    ),
-                    None => type_error(format!("missing field {}", field)),
-                }
+        (Record(subfields), Record(superfields)) => {
+            constrain_fields(subfields, superfields, variable_states, cache)
+        }
+        (Variant(subvariants), Record(superfields)) => {
+            for (
+                name,
+                VariantType {
+                    args: subargs,
+                    fields: subfields,
+                },
+            ) in subvariants.iter()
+            {
+                constrain_fields(
+                    subfields,
+                    superfields,
+                    variable_states.clone(),
+                    cache.clone(),
+                );
             }
         }
-        (Variant(variants1), Variant(variants2)) => {
-            for (name, args2) in variants1.iter() {
-                match variants2.get(name) {
+        (Variant(subvariants), Variant(supervariants)) => {
+            for (
+                name,
+                VariantType {
+                    args: subargs,
+                    fields: subfields,
+                },
+            ) in subvariants.iter()
+            {
+                match supervariants.get(name) {
                     // Similar to function definition
-                    Some(args1) => {
-                        if args1.len() != args2.len() {
+                    Some(VariantType {
+                        args: superargs,
+                        fields: superfields,
+                    }) => {
+                        if subargs.len() != superargs.len() {
                             type_error(format!(
                                 "matched against variant {} with {} arguments, but it only takes {}",
                                 name,
-                                args2.len(),
-                                args1.len()
+                                subargs.len(),
+                                superargs.len()
                             ));
                         }
-                        for (arg1, arg2) in args1.iter().zip(args2.iter()) {
+                        for (subarg, superarg) in subargs.iter().zip(superargs.iter()) {
                             constrain_(
-                                arg1.clone(),
-                                arg2.clone(),
+                                subarg.clone(),
+                                superarg.clone(),
                                 variable_states.clone(),
                                 cache.clone(),
                             );
                         }
+                        constrain_fields(
+                            subfields,
+                            superfields,
+                            variable_states.clone(),
+                            cache.clone(),
+                        );
                     }
                     None => type_error(format!("missing variant {}", name)),
                 }
@@ -437,22 +515,7 @@ fn primitive_simple_type(p: Primitive) -> Rc<SimpleType> {
 //
 // TODO: Get more descriptive types for these parameters
 
-struct VariantState {
-    var: VarName,
-    methods: ImMap<FieldName, Rc<SimpleType>>,
-}
-
-impl VariantState {
-    fn new(vs: Rc<RefCell<VariableStates>>) -> Self {
-        let var = vs.borrow_mut().fresh_var_name();
-        VariantState {
-            var,
-            methods: ImMap::new(),
-        }
-    }
-}
-
-type VariantContext = MutMap<VarName, VariantState>;
+type VariantContext = MutMap<VarName, VarName>;
 
 fn typecheck_statements(
     statements: &Statements,
@@ -551,20 +614,24 @@ fn typecheck_pattern(
     use Pattern::*;
     match pat {
         Constant(c) => (typecheck_constant(c), var_ctx.clone()),
-        Variant(name, patterns) => {
+        Variant(name, arg_patterns) => {
             let mut var_ctx = var_ctx.clone();
-            let pattern_types = patterns
+            let arg_types = arg_patterns
                 .iter()
-                .map(|pattern| {
-                    let (pattern_type, new_var_ctx) =
-                        typecheck_pattern(pattern, &var_ctx, variable_states.clone());
+                .map(|arg_pattern| {
+                    let (arg_type, new_var_ctx) =
+                        typecheck_pattern(arg_pattern, &var_ctx, variable_states.clone());
                     var_ctx = new_var_ctx;
-                    pattern_type
+                    arg_type
                 })
                 .collect();
+            let variant_type = VariantType {
+                args: arg_types,
+                fields: ImMap::new(),
+            };
             (
                 Rc::new(SimpleType::Concrete(Rc::new(ConcreteType::Variant(
-                    im::ordmap! {name.clone() => pattern_types},
+                    im::ordmap! {name.clone() => variant_type},
                 )))),
                 var_ctx,
             )
@@ -905,14 +972,38 @@ fn typecheck_expr(
                     )
                 })
                 .collect();
+            let variant_type = VariantType {
+                args: arg_types,
+                fields: ImMap::new(),
+            };
             Rc::new(SimpleType::Concrete(Rc::new(ConcreteType::Variant(
-                im::ordmap! {name.clone() => arg_types},
+                im::ordmap! {name.clone() => variant_type},
             ))))
         }
     };
     // println!("TYPECHECK EXPR {:?}", expr);
     // println!("TYPECHECK GOT  {:?}", simple_type);
     simple_type
+}
+
+fn freshen_fields(
+    fields: &Fields,
+    variable_states: Rc<RefCell<VariableStates>>,
+    qvar_context: Rc<RefCell<MutMap<VarName, VarName>>>,
+) -> Fields {
+    fields
+        .iter()
+        .map(|(name, simple_type)| {
+            (
+                name.clone(),
+                freshen_simple_type(
+                    simple_type.clone(),
+                    variable_states.clone(),
+                    qvar_context.clone(),
+                ),
+            )
+        })
+        .collect()
 }
 
 fn freshen_concrete_type(
@@ -938,8 +1029,8 @@ fn freshen_concrete_type(
         Variant(ref variants) => {
             let variants = variants
                 .iter()
-                .map(|(name, simple_types)| {
-                    let simple_types: Vec<_> = simple_types
+                .map(|(name, VariantType { args, fields })| {
+                    let args: Vec<_> = args
                         .iter()
                         .map(|simple_type| {
                             freshen_simple_type(
@@ -949,25 +1040,17 @@ fn freshen_concrete_type(
                             )
                         })
                         .collect();
-                    (name.clone(), simple_types)
+                    let fields =
+                        freshen_fields(fields, variable_states.clone(), qvar_context.clone());
+                    // I should probably freshen these fields... right?
+                    let variant_type = VariantType { args, fields };
+                    (name.clone(), variant_type)
                 })
                 .collect();
             Rc::new(Variant(variants))
         }
         Record(ref fields) => {
-            let fields = fields
-                .iter()
-                .map(|(name, simple_type)| {
-                    (
-                        name.clone(),
-                        freshen_simple_type(
-                            simple_type.clone(),
-                            variable_states.clone(),
-                            qvar_context.clone(),
-                        ),
-                    )
-                })
-                .collect();
+            let fields = freshen_fields(fields, variable_states, qvar_context);
             Rc::new(Record(fields))
         }
     }
@@ -1102,23 +1185,32 @@ fn coalesce_concrete_type_after_recursion_check(
         ConcreteType::Variant(variants) => {
             let variants = variants
                 .iter()
-                .map(|(name, variant_types)| {
-                    let variant_types = variant_types
-                        .iter()
-                        .map(|variant_type| {
-                            coalesce_simple_type_(
-                                variant_type.clone(),
-                                variable_states.clone(),
-                                recursive_variables_vars.clone(),
-                                recursive_variables_types.clone(),
-                                in_process_vars.clone(),
-                                in_process_types.clone(),
-                                polarity,
-                            )
-                        })
-                        .collect();
-                    (name.clone(), variant_types)
-                })
+                .map(
+                    |(
+                        name,
+                        VariantType {
+                            args: arg_types,
+                            // We're not including the fields into the user-facing AstType. Maybe we could in some UI in the future.
+                            fields: _,
+                        },
+                    )| {
+                        let arg_types = arg_types
+                            .iter()
+                            .map(|arg| {
+                                coalesce_simple_type_(
+                                    arg.clone(),
+                                    variable_states.clone(),
+                                    recursive_variables_vars.clone(),
+                                    recursive_variables_types.clone(),
+                                    in_process_vars.clone(),
+                                    in_process_types.clone(),
+                                    polarity,
+                                )
+                            })
+                            .collect();
+                        (name.clone(), arg_types)
+                    },
+                )
                 .collect::<Vec<_>>();
             AstType::Variant(variants)
         }
@@ -1357,24 +1449,25 @@ fn typecheck_item(
                         match &**concrete {
                             ConcreteType::Variant(variants) => {
                                 for (variant_name, _) in variants {
-                                    let mut variant_state =
+                                    let mut variant_var =
                                         variant_ctx.entry(variant_name.clone()).or_insert_with(
-                                            || VariantState::new(variable_states.clone()),
+                                            || variable_states.borrow_mut().fresh_var_name(),
                                         );
                                     // I might be able to constrain each variant_state.var against the whole set of variants in the pattern above.
                                     constrain(
-                                        Rc::new(SimpleType::Variable(variant_state.var.clone())),
+                                        Rc::new(SimpleType::Variable(variant_var.clone())),
                                         self_arg_type.clone(),
                                         variable_states.clone(),
                                     );
-                                    if variant_state.methods.contains_key(method_name) {
-                                        panic!(
-                                            "the same methods cannot be defined on a variant twice"
-                                        )
-                                    }
-                                    variant_state
-                                        .methods
-                                        .insert(method_name.to_string(), function_type.clone());
+                                    // TODO: rework this
+                                    // if variant_var.contains_key(method_name) {
+                                    //     panic!(
+                                    //         "the same methods cannot be defined on a variant twice"
+                                    //     )
+                                    // }
+                                    // variant_state
+                                    //     .methods
+                                    //     .insert(method_name.to_string(), function_type.clone());
                                     // TODO: I still have to constrain any newly instantiated variants to use this variant type.
                                 }
                             }

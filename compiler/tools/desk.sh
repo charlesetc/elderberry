@@ -1,2 +1,2 @@
 #!/bin/bash
-./typecheck.sh desk
+./tools/typecheck.sh desk

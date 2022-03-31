@@ -1,4 +1,11 @@
-module A {
+let main = {
+    let x = Hi;
+    let y = if true x.wow else 2;
+    let z = if true x.wow else "hi";
+    x
+}
+
+/* module A {
     module B {
         module C {
             let foo = 2
@@ -12,6 +19,7 @@ module A {
 }
 
 let baz = A.X.Y.bar
+*/
 
 
 /* module Test {

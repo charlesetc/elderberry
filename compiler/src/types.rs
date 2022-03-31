@@ -18,14 +18,22 @@ type VarName = String;
 type FieldName = String;
 type VariantName = String;
 
+pub type Fields = ImMap<FieldName, Rc<SimpleType>>;
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct VariantType {
+    pub args: Vec<Rc<SimpleType>>,
+    pub fields: Fields,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ConcreteType {
     Top,
     Bottom,
     Primitive(Primitive),
     Function(Vec<Rc<SimpleType>>, Rc<SimpleType>),
-    Record(ImMap<FieldName, Rc<SimpleType>>),
-    Variant(ImMap<VariantName, Vec<Rc<SimpleType>>>),
+    Record(Fields),
+    Variant(ImMap<VariantName, VariantType>),
 }
 
 // We have two refcells here so we can "unify" vars by replacing one
