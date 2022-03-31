@@ -1548,11 +1548,31 @@ fn simplify_signature(signature: Signature<Rc<AstType>>) -> Signature<Rc<AstType
     Rc::new(RefCell::new(signature))
 }
 
+fn scan_for_variant_context(item: Item, &mut variant_ctx) {
+    match item {
+        Item::QualifiedImport(_, _) |
+        Item::Let(_,_,_) => (),
+        Item::Module(_, items) => {
+            for (_, item) in items {
+                scan_for_variant_context(item, variant_ctx)
+            }
+        }
+        Item::Method(name, patterns, expr ).... 
+
+        /// TODO: Pick up here
+    }
+
+}
+
 pub fn typecheck_modules(items: Program) -> Signature<Rc<AstType>> {
     let var_ctx = Rc::new(RefCell::new(ImMap::new()));
     let variable_states = Rc::new(RefCell::new(VariableStates::new()));
     let module_ctx = new_signature();
-    let variant_ctx = Rc::new(RefCell::new(MutMap::new()));
+    let mut variant_ctx = MutMap::new();
+    for item in items.iter() {
+        scan_for_variant_context(item, &mut variant_ctx);
+    }
+    let variant_ctx = variant_ctx; // remove mutability
 
     // Choice for the initial version: Only evaluate modules in a lexical, top-to-bottom, way.
     // This saves time and maybe is good enough since the editor can perform a topological sort when
@@ -1566,7 +1586,7 @@ pub fn typecheck_modules(items: Program) -> Signature<Rc<AstType>> {
             var_ctx.clone(),
             variable_states.clone(),
             module_ctx.clone(),
-            variant_ctx.clone(),
+            &variant_ctx,
             &vec![],
             item,
         );
