@@ -627,7 +627,6 @@ fn typecheck_constant(constant: &Constant) -> Rc<SimpleType> {
 fn typecheck_pattern(
     pat: &Pattern,
     var_ctx: &ImMap<String, Rc<dyn MaybeQuantified>>,
-    variant_ctx: &VariantContext,
     variable_states: Rc<RefCell<VariableStates>>,
 ) -> (Rc<SimpleType>, ImMap<String, Rc<dyn MaybeQuantified>>) {
     use Pattern::*;
@@ -638,12 +637,8 @@ fn typecheck_pattern(
             let arg_types = arg_patterns
                 .iter()
                 .map(|arg_pattern| {
-                    let (arg_type, new_var_ctx) = typecheck_pattern(
-                        arg_pattern,
-                        &var_ctx,
-                        variant_ctx,
-                        variable_states.clone(),
-                    );
+                    let (arg_type, new_var_ctx) =
+                        typecheck_pattern(arg_pattern, &var_ctx, variable_states.clone());
                     var_ctx = new_var_ctx;
                     arg_type
                 })
@@ -665,7 +660,7 @@ fn typecheck_pattern(
                 .iter()
                 .map(|(name, pattern)| {
                     let (pattern_type, new_var_ctx) =
-                        typecheck_pattern(pattern, &var_ctx, variant_ctx, variable_states.clone());
+                        typecheck_pattern(pattern, &var_ctx, variable_states.clone());
                     var_ctx = new_var_ctx;
                     (name, pattern_type)
                 })
@@ -818,7 +813,7 @@ fn typecheck_expr(
                 let mut arg_types = vec![];
                 let var_ctx = args.iter().fold(var_ctx.clone(), |var_ctx, arg| {
                     let (arg_type, var_ctx) =
-                        typecheck_pattern(arg, &var_ctx, variant_ctx, variable_states.clone());
+                        typecheck_pattern(arg, &var_ctx, variable_states.clone());
                     arg_types.push(arg_type);
                     var_ctx
                 });
@@ -967,7 +962,7 @@ fn typecheck_expr(
             );
             for (pattern, branch_expr) in branches.iter() {
                 let (pattern_type, var_ctx) =
-                    typecheck_pattern(pattern, var_ctx, variant_ctx, variable_states.clone());
+                    typecheck_pattern(pattern, var_ctx, variable_states.clone());
                 constrain(expr_type.clone(), pattern_type, variable_states.clone());
                 let branch_type = typecheck_expr(
                     branch_expr,
@@ -1441,12 +1436,12 @@ fn typecheck_item(
         Item::Method(method_name, receiver, args, expr) => {
             let var_ctx = var_ctx.borrow().clone();
             let (receiver_type, var_ctx) =
-                typecheck_pattern(receiver, &var_ctx, variant_ctx, variable_states.clone());
+                typecheck_pattern(receiver, &var_ctx, variable_states.clone());
             let (arg_types, var_ctx) = {
                 let mut arg_types = vec![];
                 let var_ctx = args.iter().fold(var_ctx, |var_ctx, arg| {
                     let (arg_type, var_ctx) =
-                        typecheck_pattern(arg, &var_ctx, variant_ctx, variable_states.clone());
+                        typecheck_pattern(arg, &var_ctx, variable_states.clone());
                     arg_types.push(arg_type);
                     var_ctx
                 });
@@ -1574,7 +1569,7 @@ fn scan_for_variant_context(
         Item::Method(method_name, receiver, _args, _body) => {
             let var_ctx = ImMap::new();
             let (pattern_type, _var_ctx) =
-                typecheck_pattern(receiver, &var_ctx, variant_ctx, variable_states.clone());
+                typecheck_pattern(receiver, &var_ctx, variable_states.clone());
             match &*pattern_type {
                 SimpleType::Concrete(concrete) => match &**concrete {
                     ConcreteType::Variant(variant_types) => {
