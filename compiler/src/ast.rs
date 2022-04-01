@@ -58,16 +58,16 @@ pub enum Item {
     Module(VarName, Vec<Item>),
     QualifiedImport(Vec<VarName>, VarName),
     Let(RecFlag, VarName, Expr),
-    Method(VarName, Vec<Pattern>, Expr),
+    Method(VarName, Pattern, Vec<Pattern>, Expr),
 }
 
 impl Item {
-    pub fn name(self) -> VarName {
+    pub fn name_for_generator(&self) -> Option<VarName> {
         match self {
-            Item::Module(name, _) => name,
-            Item::QualifiedImport(_, name) => name,
-            Item::Let(_, name, _) => name,
-            Item::Method(_, _, _) => unimplemented!(),
+            Item::Module(name, _) => Some(name.clone()),
+            Item::QualifiedImport(_, name) => Some(name.clone()),
+            Item::Let(_, name, _) => Some(name.clone()),
+            Item::Method(_, _, _, _) => None,
         }
     }
 }

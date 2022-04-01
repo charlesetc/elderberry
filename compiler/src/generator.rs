@@ -256,10 +256,14 @@ fn generate_toplevel_item(out: &mut String, item: &Item) {
             }
             out.push_str("{");
             for item in items {
-                let name = item.clone().name();
-                out.push_str(&name);
-                out.push_str(":");
-                out.push_str(&name);
+                match item.name_for_generator() {
+                    None => (),
+                    Some(name) => {
+                        out.push_str(&name);
+                        out.push_str(":");
+                        out.push_str(&name);
+                    }
+                }
             }
             out.push_str("}");
             out.push_str("};");
@@ -281,7 +285,7 @@ fn generate_toplevel_item(out: &mut String, item: &Item) {
         Item::Let(Recursive, _, _) => {
             unimplemented!()
         }
-        Item::Method(_, _, _) => unimplemented!(),
+        Item::Method(_, _, _, _) => unimplemented!(),
     }
 }
 

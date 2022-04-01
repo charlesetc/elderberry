@@ -168,6 +168,13 @@ fn expect_and_consume(tokens: &mut &[TokenWithSpan], token: Token) {
     }
 }
 
+fn maybe_consume(tokens: &mut &[TokenWithSpan], token: Token) {
+    match tokens {
+        [(first_token, _), rest @ ..] if &token == first_token => *tokens = rest,
+        _ => (),
+    }
+}
+
 fn parse_record_body_in_reverse(tokens: &mut &[TokenWithSpan]) -> Vec<(FieldName, Expr)> {
     match tokens {
         [(Token::CloseBrace, _), rest @ ..] => {
@@ -700,10 +707,12 @@ fn parse_item(tokens: &mut &[TokenWithSpan]) -> Option<Item> {
         [(Token::Method, _), (Token::LowerVar(method_name), _), rest @ ..] => {
             *tokens = rest;
             expect_and_consume(tokens, Token::OpenParen);
+            let receiver = parse_pattern(tokens);
+            maybe_consume(tokens, Token::Comma);
             let args = parse_comma_separated_patterns(tokens, Token::CloseParen);
             // TODO: parse an equals sign or assert a curley brace
             let expr = parse_expression(tokens);
-            Some(Item::Method(method_name.to_string(), args, expr))
+            Some(Item::Method(method_name.to_string(), receiver, args, expr))
         }
         _ => expected("import, let statement, or module definition", 5, tokens),
     }
