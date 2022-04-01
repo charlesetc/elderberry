@@ -578,3 +578,44 @@ fn test_module_indirection() {
     )
     "###);
 }
+
+#[test]
+fn test_basic_methods() {
+    insta::assert_debug_snapshot!(test("
+        method foo(Bar) { 2 }
+
+        let b = Bar
+        "), @r###"
+    Variant(
+        [
+            (
+                "Bar",
+                [],
+            ),
+        ],
+    )
+    "###);
+
+    insta::assert_debug_snapshot!(test("
+        method foo(Bar) { 2 }
+
+        let b = { Bar }.foo
+        "), @r###"
+    Function(
+        [],
+        Primitive(
+            Int,
+        ),
+    )
+    "###);
+
+    insta::assert_debug_snapshot!(test("
+        method foo(Bar) { 2 }
+
+        let b = { Bar }.foo()
+        "), @r###"
+    Primitive(
+        Int,
+    )
+    "###);
+}

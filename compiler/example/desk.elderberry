@@ -1,9 +1,16 @@
+
+method foo(Test) 2
+
+let x = { Test } .foo
+
+/*
 let main = {
     let x = Hi;
     let y = if true x.wow else 2;
     let z = if true x.wow else "hi";
     x
 }
+*/
 
 /* module A {
     module B {

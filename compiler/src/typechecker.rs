@@ -131,6 +131,31 @@ fn greatest_lower_bound_concrete(
             ))
         }
         (Primitive(a), Primitive(b)) if a == b => Rc::new(Primitive(a.clone())),
+        (Record(record_fields), Variant(variants)) | (Variant(variants), Record(record_fields)) => {
+            let variants = variants
+                .iter()
+                .map(|(name, variant_type)| {
+                    let VariantType {
+                        args,
+                        fields: variant_fields,
+                    } = variant_type;
+                    let fields = greatest_lower_bound_for_fields(
+                        variant_fields,
+                        record_fields,
+                        variable_states.clone(),
+                        cache.clone(),
+                    );
+                    (
+                        name,
+                        VariantType {
+                            args: args.clone(),
+                            fields,
+                        },
+                    )
+                })
+                .collect();
+            Rc::new(Variant(variants))
+        }
         (Variant(a_variants), Variant(b_variants)) => {
             let all_keys: ImSet<String> = a_variants.keys().chain(b_variants.keys()).collect();
             let variants = all_keys
@@ -402,6 +427,7 @@ fn constrain_concrete_types(
                 },
             ) in subvariants.iter()
             {
+                println!("constraining here! {:?} {:?}", subvariants, superfields);
                 constrain_fields(
                     subfields,
                     superfields,
@@ -520,7 +546,7 @@ fn primitive_simple_type(p: Primitive) -> Rc<SimpleType> {
 
 struct VariantState {
     var: VarName,
-    methods: ImMap<FieldName, VarName>,
+    fields: Fields,
 }
 
 impl VariantState {
@@ -528,7 +554,7 @@ impl VariantState {
         let var = vs.borrow_mut().fresh_var_name();
         VariantState {
             var,
-            methods: ImMap::new(),
+            fields: ImMap::new(),
         }
     }
 }
@@ -627,6 +653,7 @@ fn typecheck_constant(constant: &Constant) -> Rc<SimpleType> {
 fn typecheck_pattern(
     pat: &Pattern,
     var_ctx: &ImMap<String, Rc<dyn MaybeQuantified>>,
+    variant_ctx: &VariantContext,
     variable_states: Rc<RefCell<VariableStates>>,
 ) -> (Rc<SimpleType>, ImMap<String, Rc<dyn MaybeQuantified>>) {
     use Pattern::*;
@@ -637,15 +664,24 @@ fn typecheck_pattern(
             let arg_types = arg_patterns
                 .iter()
                 .map(|arg_pattern| {
-                    let (arg_type, new_var_ctx) =
-                        typecheck_pattern(arg_pattern, &var_ctx, variable_states.clone());
+                    let (arg_type, new_var_ctx) = typecheck_pattern(
+                        arg_pattern,
+                        &var_ctx,
+                        variant_ctx,
+                        variable_states.clone(),
+                    );
                     var_ctx = new_var_ctx;
                     arg_type
                 })
                 .collect();
+
+            let fields = match variant_ctx.get(name) {
+                Some(variant_state) => variant_state.fields.clone(),
+                None => ImMap::new(),
+            };
             let variant_type = VariantType {
                 args: arg_types,
-                fields: ImMap::new(),
+                fields,
             };
             (
                 Rc::new(SimpleType::Concrete(Rc::new(ConcreteType::Variant(
@@ -660,7 +696,7 @@ fn typecheck_pattern(
                 .iter()
                 .map(|(name, pattern)| {
                     let (pattern_type, new_var_ctx) =
-                        typecheck_pattern(pattern, &var_ctx, variable_states.clone());
+                        typecheck_pattern(pattern, &var_ctx, variant_ctx, variable_states.clone());
                     var_ctx = new_var_ctx;
                     (name, pattern_type)
                 })
@@ -813,7 +849,7 @@ fn typecheck_expr(
                 let mut arg_types = vec![];
                 let var_ctx = args.iter().fold(var_ctx.clone(), |var_ctx, arg| {
                     let (arg_type, var_ctx) =
-                        typecheck_pattern(arg, &var_ctx, variable_states.clone());
+                        typecheck_pattern(arg, &var_ctx, variant_ctx, variable_states.clone());
                     arg_types.push(arg_type);
                     var_ctx
                 });
@@ -962,7 +998,7 @@ fn typecheck_expr(
             );
             for (pattern, branch_expr) in branches.iter() {
                 let (pattern_type, var_ctx) =
-                    typecheck_pattern(pattern, var_ctx, variable_states.clone());
+                    typecheck_pattern(pattern, var_ctx, variant_ctx, variable_states.clone());
                 constrain(expr_type.clone(), pattern_type, variable_states.clone());
                 let branch_type = typecheck_expr(
                     branch_expr,
@@ -990,17 +1026,21 @@ fn typecheck_expr(
                     )
                 })
                 .collect();
+            let fields = match variant_ctx.get(name) {
+                Some(variant_state) => variant_state.fields.clone(),
+                None => ImMap::new(),
+            };
             let variant_type = VariantType {
                 args: arg_types,
-                fields: ImMap::new(),
+                fields,
             };
             Rc::new(SimpleType::Concrete(Rc::new(ConcreteType::Variant(
                 im::ordmap! {name.clone() => variant_type},
             ))))
         }
     };
-    // println!("TYPECHECK EXPR {:?}", expr);
-    // println!("TYPECHECK GOT  {:?}", simple_type);
+    println!("TYPECHECK EXPR {:?}", expr);
+    println!("TYPECHECK GOT  {:?}", simple_type);
     simple_type
 }
 
@@ -1436,12 +1476,12 @@ fn typecheck_item(
         Item::Method(method_name, receiver, args, expr) => {
             let var_ctx = var_ctx.borrow().clone();
             let (receiver_type, var_ctx) =
-                typecheck_pattern(receiver, &var_ctx, variable_states.clone());
+                typecheck_pattern(receiver, &var_ctx, variant_ctx, variable_states.clone());
             let (arg_types, var_ctx) = {
                 let mut arg_types = vec![];
                 let var_ctx = args.iter().fold(var_ctx, |var_ctx, arg| {
                     let (arg_type, var_ctx) =
-                        typecheck_pattern(arg, &var_ctx, variable_states.clone());
+                        typecheck_pattern(arg, &var_ctx, variant_ctx, variable_states.clone());
                     arg_types.push(arg_type);
                     var_ctx
                 });
@@ -1568,17 +1608,17 @@ fn scan_for_variant_context(
         }
         Item::Method(method_name, receiver, _args, _body) => {
             let var_ctx = ImMap::new();
-            let (pattern_type, _var_ctx) =
-                typecheck_pattern(receiver, &var_ctx, variable_states.clone());
-            match &*pattern_type {
+            let (receiver_pattern_type, _var_ctx) =
+                typecheck_pattern(receiver, &var_ctx, variant_ctx, variable_states.clone());
+            match &*receiver_pattern_type {
                 SimpleType::Concrete(concrete) => match &**concrete {
                     ConcreteType::Variant(variant_types) => {
-                        for (variant_name, VariantType { .. }) in variant_types {
+                        for (variant_name, _variant_type) in variant_types {
                             let variant_state = variant_ctx
                                 .entry(variant_name.clone())
                                 .or_insert_with(|| VariantState::new(variable_states.clone()));
-                            let method_var = variable_states.borrow_mut().fresh_var_name();
-                            if variant_state.methods.contains_key(method_name) {
+                            let method_var = variable_states.borrow_mut().fresh_var();
+                            if variant_state.fields.contains_key(method_name) {
                                 panic!(
                                     "method {} is already defined on variant {}",
                                     method_name, variant_name
@@ -1587,9 +1627,7 @@ fn scan_for_variant_context(
                             // Is this actually mutating? Why is it allowed if variant_state is not mutable?
                             // I guess we have ownership of variant_state so we could borrow it as mutable if we want
                             // to. Weird.
-                            variant_state
-                                .methods
-                                .insert(method_name.clone(), method_var);
+                            variant_state.fields.insert(method_name.clone(), method_var);
                         }
                     }
                     _ => panic!("methods should be defined on variants"),
