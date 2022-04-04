@@ -1026,13 +1026,27 @@ fn typecheck_expr(
                     )
                 })
                 .collect();
-            let fields = match variant_ctx.get(name) {
-                Some(variant_state) => variant_state.fields.clone(),
-                None => ImMap::new(),
-            };
-            let variant_type = VariantType {
-                args: arg_types,
-                fields,
+            let variant_type = match variant_ctx.get(name) {
+                Some(variant_state) => {
+                    let variant_type = VariantType {
+                        args: arg_types,
+                        fields: variant_state.fields.clone(),
+                    };
+                    let variant_simple_type = Rc::new(SimpleType::Concrete(Rc::new(
+                        ConcreteType::Variant(im::ordmap! {name.clone() => variant_type.clone()}),
+                    )));
+                    // TODO it's unclear to me if this is correct
+                    constrain(
+                        variant_simple_type,
+                        Rc::new(SimpleType::Variable(variant_state.var.clone())),
+                        variable_states,
+                    );
+                    variant_type
+                }
+                None => VariantType {
+                    args: arg_types,
+                    fields: ImMap::new(),
+                },
             };
             Rc::new(SimpleType::Concrete(Rc::new(ConcreteType::Variant(
                 im::ordmap! {name.clone() => variant_type},
@@ -1100,7 +1114,6 @@ fn freshen_concrete_type(
                         .collect();
                     let fields =
                         freshen_fields(fields, variable_states.clone(), qvar_context.clone());
-                    // I should probably freshen these fields... right?
                     let variant_type = VariantType { args, fields };
                     (name.clone(), variant_type)
                 })
@@ -1513,7 +1526,7 @@ fn typecheck_item(
                 SimpleType::Concrete(concrete) => {
                     match &**concrete {
                         ConcreteType::Variant(variants) => {
-                            for (variant_name, _) in variants {
+                            for (variant_name, receiver_variant_type) in variants {
                                 let variant_state = variant_ctx
                                     .get(variant_name)
                                     .expect("we're defining a method on it, so it should be scanned ahead of time and put in the varaints list");
@@ -1521,7 +1534,7 @@ fn typecheck_item(
                                 let variant_var = Rc::new(SimpleType::Variable(variant_state.var.clone()));
                                 constrain(
                                     variant_var.clone(),
-                                    receiver_type.clone(),
+                                    Rc::new(SimpleType::Concrete(Rc::new(ConcreteType::Variant(im::ordmap!{ variant_name.clone() => receiver_variant_type.clone() })))),
                                     variable_states.clone(),
                                 );
                                 constrain(

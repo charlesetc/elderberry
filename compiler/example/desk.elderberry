@@ -1,7 +1,12 @@
 
-method foo(Test) 2
+method id(Test, x) {
+    self.wow(3)
+}
 
-let x = { Test } .foo
+method wow(Test, x) { 
+    Nice(x)
+}
+
 
 /*
 let main = {
