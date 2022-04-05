@@ -1,12 +1,13 @@
-method box(Some(x)) = Box(x)
 
-method box(None) = None
+method map(Some(x), f) = Some(f(x))
+
+method map(None, f) = None
 
 let a = if true { Some(2) } else { None }
+         
+let b = a.map(|x| "hi")
 
-let b = a.box()
-
-/*
+/* let main = if true |x| Some(x) else |x| None */ /*
 method foo(Bar, x) { x }
 
 let a = { Bar }.foo(2)

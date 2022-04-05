@@ -85,86 +85,86 @@ fn test_record() {
 #[test]
 fn test_most_basic_apply() {
     insta::assert_debug_snapshot!(test("let x = |y| |x| y(x)"), @r###"
-        Function(
-            [
-                Function(
-                    [
-                        TypeVariable(
-                            "a1",
-                        ),
-                    ],
-                    TypeVariable(
-                        "a2",
-                    ),
-                ),
-            ],
+    Function(
+        [
             Function(
                 [
                     TypeVariable(
-                        "a1",
+                        "b1",
                     ),
                 ],
                 TypeVariable(
-                    "a2",
+                    "c2",
                 ),
             ),
-        )
-        "###);
-    insta::assert_debug_snapshot!(test("let f = |y, x| y(x, x)"), @r###"
+        ],
         Function(
             [
-                Function(
-                    [
-                        TypeVariable(
-                            "a4",
-                        ),
-                        TypeVariable(
-                            "a4",
-                        ),
-                    ],
-                    TypeVariable(
-                        "a5",
-                    ),
-                ),
                 TypeVariable(
-                    "a4",
+                    "b1",
                 ),
             ],
             TypeVariable(
-                "a5",
+                "c2",
             ),
-        )
-        "###);
+        ),
+    )
+    "###);
+    insta::assert_debug_snapshot!(test("let f = |y, x| y(x, x)"), @r###"
+    Function(
+        [
+            Function(
+                [
+                    TypeVariable(
+                        "e4",
+                    ),
+                    TypeVariable(
+                        "e4",
+                    ),
+                ],
+                TypeVariable(
+                    "f5",
+                ),
+            ),
+            TypeVariable(
+                "e4",
+            ),
+        ],
+        TypeVariable(
+            "f5",
+        ),
+    )
+    "###);
 }
 
 #[test]
 fn test_twice() {
     insta::assert_debug_snapshot!(test("let x = |f| |x| f(f(x))"), @r###"
-        Function(
-            [
-                Function(
-                    [
-                        TypeVariable(
-                            "a1",
-                        ),
-                    ],
-                    TypeVariable(
-                        "a1",
-                    ),
-                ),
-            ],
+    Function(
+        [
             Function(
                 [
                     TypeVariable(
-                        "a1",
+                        "b1",
                     ),
                 ],
                 TypeVariable(
-                    "a1",
+                    "b1",
                 ),
             ),
-        )
-        "###);
+        ],
+        Function(
+            [
+                TypeVariable(
+                    "b1",
+                ),
+            ],
+            TypeVariable(
+                "b1",
+            ),
+        ),
+    )
+    "###);
 }
 
 #[test]
@@ -184,22 +184,22 @@ fn test_if_statement() {
         )
         "###);
     insta::assert_debug_snapshot!(test("let x = |x| if x x else x"), @r###"
-        Function(
-            [
-                Intersection(
-                    TypeVariable(
-                        "a1",
-                    ),
-                    Primitive(
-                        Bool,
-                    ),
+    Function(
+        [
+            Intersection(
+                TypeVariable(
+                    "b1",
                 ),
-            ],
-            TypeVariable(
-                "a1",
+                Primitive(
+                    Bool,
+                ),
             ),
-        )
-        "###)
+        ],
+        TypeVariable(
+            "b1",
+        ),
+    )
+    "###)
 }
 
 #[test]
@@ -217,17 +217,17 @@ fn test_polymorphism() {
         )
         "###);
     insta::assert_debug_snapshot!(test("let id = |x| x let x = { id(2); id(\"3\"); id }"), @r###"
-        Function(
-            [
-                TypeVariable(
-                    "a6",
-                ),
-            ],
+    Function(
+        [
             TypeVariable(
-                "a6",
+                "g6",
             ),
-        )
-        "###);
+        ],
+        TypeVariable(
+            "g6",
+        ),
+    )
+    "###);
     insta::assert_debug_snapshot!(test("let id = |x| x let x = { id(2); id(\"3\") }"), @r###"
         Primitive(
             String,
@@ -247,30 +247,30 @@ fn test_recursion() {
         "###);
 
     insta::assert_debug_snapshot!(test("let rec f = |x| f(f(x))"), @r###"
-        Function(
-            [
-                TypeVariable(
-                    "a4",
-                ),
-            ],
+    Function(
+        [
             TypeVariable(
-                "a4",
+                "e4",
             ),
-        )
-        "###);
+        ],
+        TypeVariable(
+            "e4",
+        ),
+    )
+    "###);
     insta::assert_debug_snapshot!(test("let rec produce = |arg| { head: produce(arg) }"), @r###"
     Function(
         [
             Bottom,
         ],
         Recursive(
-            "a10",
+            "k10",
             Record(
                 [
                     (
                         "head",
                         TypeVariable(
-                            "a10",
+                            "k10",
                         ),
                     ),
                 ],
@@ -283,23 +283,23 @@ fn test_recursion() {
     Function(
         [
             TypeVariable(
-                "a12",
+                "m12",
             ),
         ],
         Recursive(
-            "a14",
+            "o14",
             Record(
                 [
                     (
                         "left",
                         TypeVariable(
-                            "a12",
+                            "m12",
                         ),
                     ),
                     (
                         "right",
                         TypeVariable(
-                            "a14",
+                            "o14",
                         ),
                     ),
                 ],
@@ -419,42 +419,42 @@ fn test_match() {
         )
         "###);
     insta::assert_debug_snapshot!(test("let f = |a| match a { { name: a } -> { wow: a, pool: 2 }, { this: 3 } -> { foo: a, pool: a.name }}"), @r###"
-        Function(
-            [
-                Record(
-                    [
-                        (
-                            "name",
-                            Intersection(
-                                TypeVariable(
-                                    "a5",
-                                ),
-                                Primitive(
-                                    Int,
-                                ),
+    Function(
+        [
+            Record(
+                [
+                    (
+                        "name",
+                        Intersection(
+                            TypeVariable(
+                                "f5",
                             ),
-                        ),
-                        (
-                            "this",
                             Primitive(
                                 Int,
                             ),
                         ),
-                    ],
-                ),
-            ],
-            Record(
-                [
+                    ),
                     (
-                        "pool",
-                        TypeVariable(
-                            "a5",
+                        "this",
+                        Primitive(
+                            Int,
                         ),
                     ),
                 ],
             ),
-        )
-        "###);
+        ],
+        Record(
+            [
+                (
+                    "pool",
+                    TypeVariable(
+                        "f5",
+                    ),
+                ),
+            ],
+        ),
+    )
+    "###);
     insta::assert_debug_snapshot!(test("let f = |x| match x { { name: a } -> { wow: a }, { this: a } -> { wow: a }} let a = f({name: 2, this: 3}).wow"), @r###"
         Primitive(
             Int,
@@ -655,8 +655,21 @@ fn test_polymorphic_methods() {
 
         let b = a.box()
         "), @r###"
-    Primitive(
-        String,
+    Variant(
+        [
+            (
+                "Box",
+                [
+                    Primitive(
+                        Int,
+                    ),
+                ],
+            ),
+            (
+                "None",
+                [],
+            ),
+        ],
     )
     "###);
 }

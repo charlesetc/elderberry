@@ -177,7 +177,7 @@ fn maybe_consume(tokens: &mut &[TokenWithSpan], token: Token) {
 
 fn peek<'a>(tokens: &mut &'a [TokenWithSpan]) -> Option<&'a Token> {
     match tokens {
-        [(first_token, _), rest @ ..] => Some(first_token),
+        [(first_token, _), ..] => Some(first_token),
         _ => None,
     }
 }

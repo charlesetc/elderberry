@@ -97,8 +97,10 @@ dependencies = [
  "clap",
  "im",
  "insta",
+ "lazy_static",
  "logos",
  "logos-derive",
+ "radix_fmt",
 ]
 
 [[package]]
@@ -277,6 +279,12 @@ checksum = "38bc8cc6a5f2e3655e0899c1b848643b2562f853f114bfec7be120678e3ace05"
 dependencies = [
  "proc-macro2",
 ]
+
+[[package]]
+name = "radix_fmt"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce082a9940a7ace2ad4a8b7d0b1eac6aa378895f18be598230c5f2284ac05426"
 
 [[package]]
 name = "rand_core"

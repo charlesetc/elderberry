@@ -226,14 +226,19 @@ impl MaybeQuantified for SimpleType {
     }
 }
 
-thread_local!(static UNIQUE_NAME_COUNTER : RefCell<usize> = RefCell::new(0));
+thread_local!(static UNIQUE_NAME_COUNTER : RefCell<u32> = RefCell::new(0));
 
 pub fn unique_name() -> VarName {
+    use radix_fmt::radix;
     UNIQUE_NAME_COUNTER.with(|unique_name_counter| {
-        let mut ret = String::from("a");
-        ret.push_str(&unique_name_counter.borrow().clone().to_string());
-        unique_name_counter.replace_with(|&mut i| i + 1usize);
-        ret
+        let res: String = radix(*unique_name_counter.borrow(), 26)
+            .to_string()
+            .chars()
+            .map(|c| char::from_digit(char::to_digit(c, 26).unwrap() + 10u32, 36).unwrap())
+            .collect();
+        let res = res + &unique_name_counter.borrow().to_string();
+        unique_name_counter.replace_with(|&mut i| i + 1u32);
+        res
     })
 }
 
@@ -298,10 +303,18 @@ impl VariableStates {
     }
 
     pub fn set_lower_bound(&mut self, v: &VarName, value: Rc<ConcreteType>) {
+        // println!(
+        //     "SETTING LOWER BOUND {:?}, {:?} <: v@{:?}",
+        //     v, value, self[v]
+        // );
         self.find_and_map(v, |state| state.lower_bound = value);
     }
 
     pub fn set_upper_bound(&mut self, v: &VarName, value: Rc<ConcreteType>) {
+        // println!(
+        //     "SETTING UPPER BOUND {:?}, v@{:?} <: {:?}",
+        //     v, self[v], value
+        // );
         self.find_and_map(v, |state| state.upper_bound = value);
     }
 
