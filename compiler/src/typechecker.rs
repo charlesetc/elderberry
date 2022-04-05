@@ -1106,7 +1106,9 @@ fn typecheck_expr(
                     let variant_simple_type = Rc::new(SimpleType::Concrete(Rc::new(
                         ConcreteType::Variant(im::ordmap! {name.clone() => variant_type.clone()}),
                     )));
-                    // I'm not at all sure this is correct...
+                    // I'm not at all sure this is correct... maybe it relates to this footnote: ^[0]
+                    // maybe it only works because the variant var creation is also messed up in a way
+                    // that works with it all here
                     constrain(var, variant_simple_type, variable_states);
                     variant_type
                 }
@@ -1607,6 +1609,12 @@ fn typecheck_item(
                                     .expect("we're defining a method on it, so it should be scanned ahead of time and put in the varaints list");
                                 // I might be able to constrain each variant_state.var against the whole set of variants in the pattern above.
                                 let variant_var = Rc::new(SimpleType::Variable(variant_state.var.clone()));
+
+                                // [0]: My guess is that this is fundamentally an
+                                // issue, even if it's not apparent yet, and
+                                // really want we want to do is constrain the
+                                // stuff inside the variant var rather than
+                                // add an upper bound to it.
                                 constrain(
                                     variant_var.clone(),
                                     Rc::new(SimpleType::Concrete(Rc::new(ConcreteType::Variant(im::ordmap!{ variant_name.clone() => receiver_variant_type.clone() })))),
