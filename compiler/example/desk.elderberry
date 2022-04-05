@@ -1,4 +1,20 @@
+method box(Some(x)) = Box(x)
 
+method box(None) = None
+
+let a = if true { Some(2) } else { None }
+
+let b = a.box()
+
+/*
+method foo(Bar, x) { x }
+
+let a = { Bar }.foo(2)
+
+let b = { Bar }.foo("hi")
+*/
+
+/*
 method id(Test, x) {
     self.wow(3)
 }
@@ -6,7 +22,7 @@ method id(Test, x) {
 method wow(Test, x) { 
     Nice(x)
 }
-
+*/
 
 /*
 let main = {

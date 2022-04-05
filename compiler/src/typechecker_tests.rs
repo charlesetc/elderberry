@@ -619,3 +619,44 @@ fn test_basic_methods() {
     )
     "###);
 }
+
+#[test]
+fn test_polymorphic_methods() {
+    insta::assert_debug_snapshot!(test("
+        method foo(Bar, x) { x }
+
+        let a = Bar
+
+        let b = a.foo(2)
+
+        let c = a.foo(\"hi\")
+        "), @r###"
+    Primitive(
+        String,
+    )
+    "###);
+    insta::assert_debug_snapshot!(test("
+        method foo(Bar, x) { x }
+
+        let a = { Bar }.foo(2)
+
+        let b = { Bar }.foo(\"hi\")
+        "), @r###"
+    Primitive(
+        String,
+    )
+    "###);
+    insta::assert_debug_snapshot!(test("
+        method box(Some(x)) = Box(x)
+
+        method box(None) = None
+
+        let a = if true { Some(2) } else { None }
+
+        let b = a.box()
+        "), @r###"
+    Primitive(
+        String,
+    )
+    "###);
+}

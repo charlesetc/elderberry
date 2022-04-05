@@ -24,18 +24,23 @@ fn new_lower_bound(
     variable_states: Rc<RefCell<VariableStates>>,
     cache: ConstraintCache,
 ) {
-    let existing_lower_bound = variable_states.borrow().lower_bound(v);
-    let new_lower_bound = least_upper_bound_concrete(
-        existing_lower_bound.clone(),
-        lower_bound.clone(),
-        variable_states.clone(),
-        cache.clone(),
-    );
-    variable_states
-        .borrow_mut()
-        .set_lower_bound(v, new_lower_bound);
-    let upper_bound = variable_states.borrow().upper_bound(v);
-    constrain_concrete_types(lower_bound, upper_bound, variable_states, cache);
+    if cache.borrow_mut().insert((
+        Rc::new(SimpleType::Concrete(lower_bound.clone())),
+        Rc::new(SimpleType::Variable(v.clone())),
+    )) {
+        let existing_lower_bound = variable_states.borrow().lower_bound(v);
+        let new_lower_bound = least_upper_bound_concrete(
+            existing_lower_bound.clone(),
+            lower_bound.clone(),
+            variable_states.clone(),
+            cache.clone(),
+        );
+        variable_states
+            .borrow_mut()
+            .set_lower_bound(v, new_lower_bound);
+        let upper_bound = variable_states.borrow().upper_bound(v);
+        constrain_concrete_types(lower_bound, upper_bound, variable_states, cache);
+    }
 }
 
 fn new_upper_bound(
@@ -44,18 +49,23 @@ fn new_upper_bound(
     variable_states: Rc<RefCell<VariableStates>>,
     cache: ConstraintCache,
 ) {
-    let existing_upper_bound = variable_states.borrow().upper_bound(v);
-    let new_upper_bound = greatest_lower_bound_concrete(
-        existing_upper_bound,
-        upper_bound.clone(),
-        variable_states.clone(),
-        cache.clone(),
-    );
-    variable_states
-        .borrow_mut()
-        .set_upper_bound(v, new_upper_bound);
-    let lower_bound = variable_states.borrow().lower_bound(v);
-    constrain_concrete_types(lower_bound, upper_bound, variable_states, cache);
+    if cache.borrow_mut().insert((
+        Rc::new(SimpleType::Variable(v.clone())),
+        Rc::new(SimpleType::Concrete(upper_bound.clone())),
+    )) {
+        let existing_upper_bound = variable_states.borrow().upper_bound(v);
+        let new_upper_bound = greatest_lower_bound_concrete(
+            existing_upper_bound,
+            upper_bound.clone(),
+            variable_states.clone(),
+            cache.clone(),
+        );
+        variable_states
+            .borrow_mut()
+            .set_upper_bound(v, new_upper_bound);
+        let lower_bound = variable_states.borrow().lower_bound(v);
+        constrain_concrete_types(lower_bound, upper_bound, variable_states, cache);
+    }
 }
 
 fn unify_and_replace(
@@ -394,6 +404,7 @@ fn constrain_concrete_types(
     cache: ConstraintCache,
 ) {
     use ConcreteType::*;
+    println!("constraining {:?} <: {:?}", subtype, supertype);
     match (&*subtype, &*supertype) {
         (Bottom, _) | (_, Top) => (),
         (Primitive(n1), Primitive(n2)) if n1 == n2 => (), // all good
@@ -427,7 +438,6 @@ fn constrain_concrete_types(
                 },
             ) in subvariants.iter()
             {
-                println!("constraining here! {:?} {:?}", subvariants, superfields);
                 constrain_fields(
                     subfields,
                     superfields,
@@ -491,27 +501,38 @@ fn constrain_(
     variable_states: Rc<RefCell<VariableStates>>,
     cache: ConstraintCache,
 ) {
+    println!("constrain_");
     use SimpleType::*;
-    if cache
-        .borrow_mut()
-        .insert((subtype.clone(), supertype.clone()))
-    {
-        match (&*subtype, &*supertype) {
-            (Concrete(subtype_c), Concrete(supertype_c)) => constrain_concrete_types(
-                subtype_c.clone(),
-                supertype_c.clone(),
-                variable_states,
-                cache,
-            ),
-            (Variable(state1), Variable(state2)) => {
+    match (&*subtype, &*supertype) {
+        (Concrete(subtype_c), Concrete(supertype_c)) => {
+            if cache
+                .borrow_mut()
+                .insert((subtype.clone(), supertype.clone()))
+            {
+                constrain_concrete_types(
+                    subtype_c.clone(),
+                    supertype_c.clone(),
+                    variable_states,
+                    cache,
+                )
+            }
+        }
+        (Variable(state1), Variable(state2)) => {
+            if cache
+                .borrow_mut()
+                .insert((subtype.clone(), supertype.clone()))
+            {
                 unify_and_replace(state1, state2, variable_states, cache);
             }
-            (Variable(v), Concrete(supertype)) => {
-                new_upper_bound(v, supertype.clone(), variable_states, cache);
-            }
-            (Concrete(subtype), Variable(v)) => {
-                new_lower_bound(v, subtype.clone(), variable_states, cache);
-            }
+        }
+        (Variable(v), Concrete(supertype)) => {
+            // we do not check the cache here because new_upper_bound and new_lower_bound do so themselves.
+            // this is because they can also be called when constraining concrete types without going through [constrain_]
+            // with the use of methods
+            new_upper_bound(v, supertype.clone(), variable_states, cache);
+        }
+        (Concrete(subtype), Variable(v)) => {
+            new_lower_bound(v, subtype.clone(), variable_states, cache);
         }
     }
 }
@@ -544,6 +565,7 @@ fn primitive_simple_type(p: Primitive) -> Rc<SimpleType> {
 //
 // TODO: Get more descriptive types for these parameters
 
+#[derive(Debug)]
 struct VariantState {
     var: VarName,
     fields: Fields,
@@ -567,6 +589,7 @@ fn typecheck_statements(
     variable_states: Rc<RefCell<VariableStates>>,
     module_ctx: Signature<Rc<PolymorphicType>>,
     variant_ctx: &VariantContext,
+    active_variants: ImSet<VarName>,
     module_path: &Vec<VarName>,
 ) -> Rc<SimpleType> {
     use Statements::*;
@@ -579,6 +602,7 @@ fn typecheck_statements(
                 variable_states.clone(),
                 module_ctx.clone(),
                 variant_ctx,
+                active_variants.clone(),
                 module_path,
             );
             match &**rest {
@@ -589,6 +613,7 @@ fn typecheck_statements(
                     variable_states,
                     module_ctx,
                     variant_ctx,
+                    active_variants,
                     module_path,
                 ),
             }
@@ -600,6 +625,7 @@ fn typecheck_statements(
                 variable_states.clone(),
                 module_ctx.clone(),
                 variant_ctx,
+                active_variants.clone(),
                 module_path,
             );
             let var_ctx = var_ctx.update(name.clone(), expr_type);
@@ -609,6 +635,7 @@ fn typecheck_statements(
                 variable_states,
                 module_ctx,
                 variant_ctx,
+                active_variants,
                 module_path,
             )
         }
@@ -622,6 +649,7 @@ fn typecheck_statements(
                     variable_states.clone(),
                     module_ctx.clone(),
                     variant_ctx,
+                    active_variants.clone(),
                     module_path,
                 ),
                 name_type,
@@ -633,6 +661,7 @@ fn typecheck_statements(
                 variable_states,
                 module_ctx,
                 variant_ctx,
+                active_variants,
                 module_path,
             )
         }
@@ -823,9 +852,11 @@ fn typecheck_expr(
     variable_states: Rc<RefCell<VariableStates>>,
     module_ctx: Signature<Rc<PolymorphicType>>,
     variant_ctx: &VariantContext,
+    active_variants: ImSet<VarName>,
     module_path: &Vec<VarName>,
 ) -> Rc<SimpleType> {
     use Expr::*;
+    println!("typechecking expr {:?}", expr);
     let simple_type = match expr {
         Constant(c) => typecheck_constant(c),
         Var(None, name) => match var_ctx.get(name) {
@@ -863,6 +894,7 @@ fn typecheck_expr(
                     variable_states,
                     module_ctx,
                     variant_ctx,
+                    active_variants,
                     module_path,
                 ),
             ))))
@@ -878,6 +910,7 @@ fn typecheck_expr(
                         variable_states.clone(),
                         module_ctx.clone(),
                         variant_ctx,
+                        active_variants.clone(),
                         module_path,
                     )
                 })
@@ -893,6 +926,7 @@ fn typecheck_expr(
                     variable_states.clone(),
                     module_ctx,
                     variant_ctx,
+                    active_variants,
                     module_path,
                 ),
                 f_type,
@@ -912,6 +946,7 @@ fn typecheck_expr(
                             variable_states.clone(),
                             module_ctx.clone(),
                             variant_ctx,
+                            active_variants.clone(),
                             module_path,
                         ),
                     )
@@ -927,6 +962,7 @@ fn typecheck_expr(
                     variable_states.clone(),
                     module_ctx,
                     variant_ctx,
+                    active_variants,
                     module_path,
                 ),
                 Rc::new(SimpleType::Concrete(Rc::new(ConcreteType::Record(
@@ -942,6 +978,7 @@ fn typecheck_expr(
             variable_states,
             module_ctx,
             variant_ctx,
+            active_variants,
             module_path,
         ),
         If(condition, true_branch, false_branch) => {
@@ -951,6 +988,7 @@ fn typecheck_expr(
                 variable_states.clone(),
                 module_ctx.clone(),
                 variant_ctx,
+                active_variants.clone(),
                 module_path,
             );
             constrain(
@@ -965,6 +1003,7 @@ fn typecheck_expr(
                 variable_states.clone(),
                 module_ctx.clone(),
                 variant_ctx,
+                active_variants.clone(),
                 module_path,
             );
             let false_branch_type = match false_branch {
@@ -974,6 +1013,7 @@ fn typecheck_expr(
                     variable_states.clone(),
                     module_ctx,
                     variant_ctx,
+                    active_variants,
                     module_path,
                 ),
                 None => primitive_simple_type(Primitive::Unit),
@@ -994,6 +1034,7 @@ fn typecheck_expr(
                 variable_states.clone(),
                 module_ctx.clone(),
                 variant_ctx,
+                active_variants.clone(),
                 module_path,
             );
             for (pattern, branch_expr) in branches.iter() {
@@ -1006,6 +1047,7 @@ fn typecheck_expr(
                     variable_states.clone(),
                     module_ctx.clone(),
                     variant_ctx,
+                    active_variants.clone(),
                     module_path,
                 );
                 constrain(branch_type, return_type.clone(), variable_states.clone());
@@ -1022,25 +1064,50 @@ fn typecheck_expr(
                         variable_states.clone(),
                         module_ctx.clone(),
                         variant_ctx,
+                        active_variants.clone(),
                         module_path,
                     )
                 })
                 .collect();
+            // TODO: Refactor this a bit to improve readability
             let variant_type = match variant_ctx.get(name) {
                 Some(variant_state) => {
+                    println!("ACTIVE VARIANTS {:?}", active_variants);
+                    let (fields, var) = if active_variants.contains(name) {
+                        println!("2");
+                        (
+                            variant_state.fields.clone(),
+                            Rc::new(SimpleType::Variable(variant_state.var.clone())),
+                        )
+                    } else {
+                        println!(
+                            "2.1 {:?} {} {:#?}",
+                            &variant_state.fields, variant_state.var, variant_state
+                        );
+                        let fields = freshen_fields(
+                            &variant_state.fields,
+                            variable_states.clone(),
+                            Rc::new(RefCell::new(MutMap::new())),
+                        );
+                        println!("2.2");
+                        let var = Rc::new(PolymorphicType(Rc::new(SimpleType::Variable(
+                            variant_state.var.clone(),
+                        ))));
+                        println!("2.3");
+                        (fields, var.instantiate(variable_states.clone()))
+                    };
                     let variant_type = VariantType {
                         args: arg_types,
-                        fields: variant_state.fields.clone(),
+                        fields: fields,
                     };
+                    println!("5");
                     let variant_simple_type = Rc::new(SimpleType::Concrete(Rc::new(
                         ConcreteType::Variant(im::ordmap! {name.clone() => variant_type.clone()}),
                     )));
                     // TODO it's unclear to me if this is correct
-                    constrain(
-                        variant_simple_type,
-                        Rc::new(SimpleType::Variable(variant_state.var.clone())),
-                        variable_states,
-                    );
+                    println!("6");
+                    constrain(variant_simple_type, var, variable_states);
+                    println!("7");
                     variant_type
                 }
                 None => VariantType {
@@ -1063,6 +1130,12 @@ fn freshen_fields(
     variable_states: Rc<RefCell<VariableStates>>,
     qvar_context: Rc<RefCell<MutMap<VarName, VarName>>>,
 ) -> Fields {
+    println!(
+        "FRESHENING FIELDS (\n {:#?} {:#?} {:#?} \n) END",
+        fields,
+        variable_states.borrow(),
+        qvar_context
+    );
     fields
         .iter()
         .map(|(name, simple_type)| {
@@ -1121,6 +1194,7 @@ fn freshen_concrete_type(
             Rc::new(Variant(variants))
         }
         Record(ref fields) => {
+            println!("FRESHEN RECORD");
             let fields = freshen_fields(fields, variable_states, qvar_context);
             Rc::new(Record(fields))
         }
@@ -1142,6 +1216,11 @@ fn freshen_simple_type(
             // Freshen the constraints as well - a bit wordy.
             let v = match cached_v {
                 None => {
+                    let new_name = variable_states.borrow_mut().fresh_var_name();
+                    qvar_context
+                        .borrow_mut()
+                        .insert(existing_name.clone(), new_name.clone());
+
                     let existing_lower_bound = variable_states.borrow().lower_bound(existing_name);
                     let existing_upper_bound = variable_states.borrow().upper_bound(existing_name);
                     let new_lower_bound = freshen_concrete_type(
@@ -1154,16 +1233,12 @@ fn freshen_simple_type(
                         variable_states.clone(),
                         qvar_context.clone(),
                     );
-                    let new_name = variable_states.borrow_mut().fresh_var_name();
                     variable_states
                         .borrow_mut()
                         .set_lower_bound(&new_name, new_lower_bound);
                     variable_states
                         .borrow_mut()
                         .set_upper_bound(&new_name, new_upper_bound);
-                    qvar_context
-                        .borrow_mut()
-                        .insert(existing_name.clone(), new_name.clone());
                     new_name
                 }
                 Some(v) => v.clone(),
@@ -1430,12 +1505,14 @@ fn typecheck_item(
     };
     match item {
         Item::Let(Nonrecursive, name, expr) => {
+            let active_variants = ImSet::new();
             let expr_type = typecheck_expr(
                 expr,
                 &var_ctx.borrow(),
                 variable_states,
                 module_ctx,
                 variant_ctx,
+                active_variants,
                 path,
             );
             let ptype = Rc::new(PolymorphicType(expr_type));
@@ -1448,12 +1525,14 @@ fn typecheck_item(
         Item::Let(Recursive, name, expr) => {
             let name_type = variable_states.borrow_mut().fresh_var();
             var_ctx.borrow_mut().insert(name.clone(), name_type.clone());
+            let active_variants = ImSet::new();
             let expr_type = typecheck_expr(
                 expr,
                 &var_ctx.borrow(),
                 variable_states.clone(),
                 module_ctx,
                 variant_ctx,
+                active_variants,
                 path,
             );
             constrain(expr_type.clone(), name_type, variable_states);
@@ -1500,21 +1579,6 @@ fn typecheck_item(
                 });
                 (arg_types, var_ctx)
             };
-            let return_type = typecheck_expr(
-                expr,
-                &var_ctx,
-                variable_states.clone(),
-                module_ctx,
-                variant_ctx,
-                &path,
-            );
-            let function_type = Rc::new(SimpleType::Concrete(Rc::new(ConcreteType::Function(
-                arg_types,
-                return_type,
-            ))));
-            let method_access_type = Rc::new(SimpleType::Concrete(Rc::new(ConcreteType::Record(
-                im::ordmap! {method_name.clone() => function_type},
-            ))));
             // TODO: Decide if we should do this instead of the 2nd constraint down below:
             //
             // constrain(
@@ -1526,6 +1590,23 @@ fn typecheck_item(
                 SimpleType::Concrete(concrete) => {
                     match &**concrete {
                         ConcreteType::Variant(variants) => {
+                            let active_variants = variants.keys().collect();
+                            let return_type = typecheck_expr(
+                                expr,
+                                &var_ctx,
+                                variable_states.clone(),
+                                module_ctx,
+                                variant_ctx,
+                                active_variants,
+                                &path,
+                            );
+                            let function_type = Rc::new(SimpleType::Concrete(Rc::new(ConcreteType::Function(
+                                arg_types,
+                                return_type,
+                            ))));
+                            let method_access_type = Rc::new(SimpleType::Concrete(Rc::new(ConcreteType::Record(
+                                im::ordmap! {method_name.clone() => function_type},
+                            ))));
                             for (variant_name, receiver_variant_type) in variants {
                                 let variant_state = variant_ctx
                                     .get(variant_name)
@@ -1678,7 +1759,6 @@ pub fn typecheck_modules(items: Program) -> Signature<Rc<AstType>> {
             item,
         );
     }
-
     let signature = coalesce_signature(module_ctx, variable_states.clone());
     let signature = simplify_signature(signature);
     signature

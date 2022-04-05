@@ -175,6 +175,13 @@ fn maybe_consume(tokens: &mut &[TokenWithSpan], token: Token) {
     }
 }
 
+fn peek<'a>(tokens: &mut &'a [TokenWithSpan]) -> Option<&'a Token> {
+    match tokens {
+        [(first_token, _), rest @ ..] => Some(first_token),
+        _ => None,
+    }
+}
+
 fn parse_record_body_in_reverse(tokens: &mut &[TokenWithSpan]) -> Vec<(FieldName, Expr)> {
     match tokens {
         [(Token::CloseBrace, _), rest @ ..] => {
@@ -710,7 +717,9 @@ fn parse_item(tokens: &mut &[TokenWithSpan]) -> Option<Item> {
             let receiver = parse_pattern(tokens);
             maybe_consume(tokens, Token::Comma);
             let args = parse_comma_separated_patterns(tokens, Token::CloseParen);
-            // TODO: parse an equals sign or assert a curley brace
+            if peek(tokens) != Some(&Token::OpenBrace) {
+                expect_and_consume(tokens, Token::Equals);
+            }
             let expr = parse_expression(tokens);
             Some(Item::Method(method_name.to_string(), receiver, args, expr))
         }
